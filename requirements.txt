@@ -1,0 +1,19 @@
+# contextx — backends. The engine runs without any of these via built-in
+# fallbacks (hash embeddings, numpy index, identity reranker, mock LLM,
+# char-heuristic tokens), but production wants the real ones below.
+numpy>=1.24
+
+# Vector index (falls back to a persisted numpy matrix + brute-force cosine)
+faiss-cpu>=1.7          # or faiss-gpu for GPU ANN
+
+# Local embeddings + cross-encoder reranker (falls back to hash / identity)
+sentence-transformers>=2.2
+
+# Generation backend (falls back to an extractive mock if absent / no API key)
+anthropic>=0.39
+
+# Accurate token counting (falls back to a ~4-chars/token heuristic)
+tiktoken>=0.5
+
+# Tests
+pytest>=7.0

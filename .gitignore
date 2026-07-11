@@ -1,0 +1,22 @@
+# generated engine state
+.contextx_index/
+.contextx_memory.db
+.contextx_memory.db-*
+.eval_index*/
+*.db
+*.db-shm
+*.db-wal
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
