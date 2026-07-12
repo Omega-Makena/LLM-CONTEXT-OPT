@@ -1,0 +1,15 @@
+.git
+.github
+tests
+examples
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.contextx_index
+.contextx_memory.db*
+.eval_index*
+*.db
+*.db-*
+.venv
+venv

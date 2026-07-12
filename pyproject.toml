@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contextx"
+version = "0.3.0"
+description = "A context-optimization engine: ingest/query-split RAG++ with rerank, memory, hybrid search, and an offline eval harness."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Omega-Makena" }]
+keywords = ["rag", "retrieval", "llm", "context", "reranking", "vector-search"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+# Core deps. The engine runs on these alone (with built-in fallbacks for the
+# heavy backends). Install extras for the real embedding/rerank/serve stack.
+dependencies = [
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+# real vector index + embeddings + cross-encoder reranker
+retrieval = ["faiss-cpu>=1.7", "sentence-transformers>=2.2", "tiktoken>=0.5"]
+# generation backend
+llm = ["anthropic>=0.39"]
+# FastAPI service layer
+serve = ["fastapi>=0.110", "uvicorn>=0.27"]
+# document parsers
+ingest = ["pypdf>=4.0", "beautifulsoup4>=4.12"]
+# everything
+full = [
+    "faiss-cpu>=1.7", "sentence-transformers>=2.2", "tiktoken>=0.5",
+    "anthropic>=0.39", "fastapi>=0.110", "uvicorn>=0.27",
+    "pypdf>=4.0", "beautifulsoup4>=4.12",
+]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.urls]
+Repository = "https://github.com/Omega-Makena/LLM-CONTEXT-OPT"
+
+[tool.setuptools.packages.find]
+include = ["contextx*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

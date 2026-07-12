@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install (core + light backends, no torch)
+        # We deliberately skip sentence-transformers so CI stays fast: the engine
+        # runs on its hash-embedding / identity-reranker fallbacks. Tests are
+        # written to pass in that configuration.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install faiss-cpu tiktoken anthropic pytest ruff
+      - name: Lint (non-blocking)
+        run: ruff check contextx || true
+      - name: Run tests
+        run: pytest -q
