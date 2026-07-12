@@ -78,7 +78,12 @@ class Config:
     llm_backoff_base_s: float = 0.5
     enable_prompt_caching: bool = True
 
-    # --- security ---------------------------------------------------------
+    # --- security & privacy ----------------------------------------------
     injection_scan: bool = True
+    redact_pii: bool = False              # scrub PII from retrieved context
+    audit_log_path: str | None = None     # JSONL provenance trail (None = off)
+
+    # --- observability ----------------------------------------------------
+    log_requests: bool = False            # emit a structured JSON line per request
 
     stop_terms: list[str] = field(default_factory=list)

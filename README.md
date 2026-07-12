@@ -55,6 +55,18 @@ backend appears. The trace footer shows which backend each stage actually used.
 | **Resilience** | one bare API call | **retries + exp backoff + jitter + timeout** |
 | **Config** | magic numbers everywhere | one `Config` dataclass |
 
+## Production capabilities (v0.3)
+
+| Area | Capability |
+|------|-----------|
+| **Correctness** | document **delete/update** with index compaction; **embedding-model version stamping** (refuses a mismatched index); **real hybrid search** (SQLite FTS5 + reciprocal-rank fusion); **citations** + retrieval **abstention** |
+| **Multi-tenancy** | tenant isolation + **permission-filtered retrieval** (ACLs enforced in both recall channels); memory namespaced per user |
+| **Service** | **FastAPI** app (`/ingest`, `/query`, `/documents`, `/health`, `/stats`) running the engine in a threadpool; `Dockerfile` |
+| **Ingestion** | loaders (txt/md/html/pdf); **structure-aware chunking** (headings + atomic code blocks); **incremental sync** (content-hash diff) |
+| **Quality/trust** | **faithfulness/groundedness eval**; **learned rank weights** (nDCG search on labeled data) + feedback capture; **PII redaction** + **audit log** |
+| **Ops** | per-request **cost in USD**, request IDs, structured JSON logs |
+| **Packaging** | `pip install contextx` (extras: `retrieval`/`llm`/`serve`/`ingest`/`full`); MIT license; **GitHub Actions CI** with a retrieval **regression gate** |
+
 ## Stage map
 
 | # | Stage | File | Notes |
@@ -146,11 +158,12 @@ synthetic corpus; the method transfers to real data via `load_jsonl`
 
 - **A larger, difficulty-stratified eval set** — enrich toward hard queries so
   the reranker's effect is significant on the *aggregate*, not just the stratum.
-- **Answer-quality / faithfulness eval** — via an LLM judge (needs an API key);
-  measures hallucination, not just retrieval.
-- **Async collect/retrieve** — sources are still fetched synchronously.
-- **Learned rank weights** — currently fixed in `Config`; wire stage-11 feedback.
-- **LLM-based fact extraction** in memory — still a heuristic.
-- **Deployment**: managed vector DB option, horizontal scaling, load test.
+- **LLM-judge faithfulness at scale** — the harness supports an LLM judge; wiring
+  it into CI needs an API key + budget. The offline embedding-overlap proxy ships.
+- **True async I/O** — endpoints run the sync engine in a threadpool; a fully
+  async retrieval path (async source fetchers, batching) is future work.
+- **LLM-based fact extraction** in memory — still a heuristic extractor.
+- **Managed vector DB backend** — FAISS HNSW is in-process; the `VectorStore`
+  interface is the seam to swap in pgvector/Qdrant for horizontal scale.
 - **Streaming** responses and tool use in the LLM stage.
 ```

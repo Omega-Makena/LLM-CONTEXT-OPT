@@ -27,12 +27,13 @@ from .embeddings import Embedder
 from .filter import Filter
 from .llm import LLM, LLMResponse
 from .memory import MemoryManager
-from .observability import Trace
+from .observability import Trace, estimate_cost
 from .rank import Ranker
 from .rerank import Reranker
 from .retrieve import Retriever
+from .security import AuditLog, redact_pii
 from .store import VectorStore
-from .types import Document, Request, Source
+from .types import UNTRUSTED_SOURCES, Document, Request, Source
 from .validate import Validator
 
 DEFAULT_SYSTEM = (
@@ -91,6 +92,7 @@ class ContextEngine:
         self.llm = llm or LLM(self.cfg)
         self.system_prompt = system_prompt
         self.abstractive_compression = abstractive_compression
+        self.audit = AuditLog(self.cfg.audit_log_path) if self.cfg.audit_log_path else None
 
     # --- ingest (amortized) ----------------------------------------------
     def ingest(self, documents: list[Document]) -> int:
@@ -191,6 +193,15 @@ class ContextEngine:
             rec.items_out = len(kept)
             rec.notes.update(used_tok=used, avail=plan.available_for_context, trimmed=trimmed)
 
+        # PII redaction (optional): scrub retrieved context before it reaches
+        # the model / the provider.
+        pii_redacted = 0
+        if self.cfg.redact_pii:
+            for it in kept:
+                if it.source in UNTRUSTED_SOURCES:
+                    it.text, counts = redact_pii(it.text)
+                    pii_redacted += sum(counts.values())
+
         # 8 — Build
         with trace.stage("8 build", len(kept)) as rec:
             prompt = self.builder.build(request, kept, self.system_prompt)
@@ -231,8 +242,13 @@ class ContextEngine:
                     request.user_message, response.text, scope=scope)
                 rec.notes["stored"] = len(new)
 
-        # 11 — Metrics
+        # 11 — Metrics (incl. estimated dollar cost)
+        cost = estimate_cost(
+            request.model, response.input_tokens, response.output_tokens,
+            response.cache_read_tokens, response.cache_write_tokens,
+        )
         trace.metrics.update(
+            request_id=trace.request_id,
             embed_backend=self.embedder.backend,
             index_backend=self.store.backend,
             rerank_backend=self.reranker.backend,
@@ -241,11 +257,29 @@ class ContextEngine:
             cache_hit_rate=round(self.cache.hit_rate, 2),
             cache_read_tokens=response.cache_read_tokens,
             prompt_tokens=report.prompt_tokens,
+            output_tokens=response.output_tokens,
+            cost_usd=cost,
             context_items_final=len(prompt.included_items),
             injection_flags=len(report.injection_flags),
+            pii_redacted=pii_redacted,
             retrieval_confidence=round(confidence, 2),
             low_confidence=low_confidence,
         )
+
+        # audit trail + structured log (both optional)
+        if self.audit is not None:
+            self.audit.record({
+                "request_id": trace.request_id,
+                "tenant_id": request.tenant_id,
+                "principals": request.principals,
+                "query": request.user_message,
+                "retrieved_chunks": [s.get("chunk_id") for s in prompt.sources],
+                "low_confidence": low_confidence,
+                "backend": response.backend,
+                "cost_usd": cost,
+            })
+        if self.cfg.log_requests:
+            print(trace.log_line())
 
         return PipelineResult(
             answer=response.text,
