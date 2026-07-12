@@ -41,6 +41,16 @@ DEFAULT_SYSTEM = (
 )
 
 
+def _memory_scope(request: Request) -> str:
+    """Per-requester memory namespace: tenant + first principal (user), so one
+    user's remembered facts never leak to another. Default single-user mode
+    (no tenant, no principal) keeps the shared 'global' scope."""
+    if request.tenant_id == "default" and not request.principals:
+        return "global"
+    user = request.principals[0] if request.principals else "anon"
+    return f"{request.tenant_id}:{user}"
+
+
 @dataclass
 class PipelineResult:
     answer: str
@@ -114,20 +124,24 @@ class ContextEngine:
     ) -> PipelineResult:
         trace = Trace()
 
+        scope = _memory_scope(request)
+        principals = set(request.principals)
+
         # 1 — Collect ephemeral context (conversation, tool outputs) + memory read
         with trace.stage("1 collect") as rec:
             items = self.collector.collect(request, **ephemeral_sources)
             # keep only ephemeral sources here; durable knowledge comes from the index
             items = [it for it in items if it.source != Source.USER_MESSAGE]
-            mem_items = self.memory.retrieve(request.user_message)
+            mem_items = self.memory.retrieve(request.user_message, scope=scope)
             items.extend(mem_items)
             rec.items_out = len(items)
             rec.notes["memory_hits"] = len(mem_items)
 
-        # 2 — Retrieve: durable (index) + ephemeral (inline)
+        # 2 — Retrieve: durable (index) + ephemeral (inline), tenant/ACL enforced
         with trace.stage("2 retrieve", len(items)) as rec:
             candidates = self.retriever.retrieve(
-                request.user_message, items, request.metadata_filter or None
+                request.user_message, items, request.metadata_filter or None,
+                tenant_id=request.tenant_id, principals=principals,
             )
             bm25 = self.retriever.hybrid_scores(request.user_message, candidates)
             rec.items_out = len(candidates)
@@ -210,10 +224,11 @@ class ContextEngine:
             if response.retries:
                 rec.notes["retries"] = response.retries
 
-        # 5 — Memory write
+        # 5 — Memory write (scoped to the requester)
         if write_memory and report.ok:
             with trace.stage("5 memory-write") as rec:
-                new = self.memory.extract_and_store(request.user_message, response.text)
+                new = self.memory.extract_and_store(
+                    request.user_message, response.text, scope=scope)
                 rec.notes["stored"] = len(new)
 
         # 11 — Metrics

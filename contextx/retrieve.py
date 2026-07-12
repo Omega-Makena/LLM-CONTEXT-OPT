@@ -54,14 +54,19 @@ class Retriever:
         ephemeral: list[ContextItem],
         metadata_filter: dict | None = None,
         hybrid: bool | None = None,
+        tenant_id: str = "default",
+        principals: set[str] | None = None,
     ) -> list[ContextItem]:
         hybrid = self.cfg.enable_hybrid if hybrid is None else hybrid
 
         # 1) durable recall — semantic ANN, fused with a BM25 lexical channel so
         #    lexical-only matches (exact IDs, rare tokens) aren't lost at recall.
-        vec_hits = self.store.search(query, self.cfg.recall_k, metadata_filter)
+        #    Both channels enforce tenant isolation + ACLs.
+        vec_hits = self.store.search(
+            query, self.cfg.recall_k, metadata_filter, tenant_id, principals)
         if hybrid and self.store.fts_enabled:
-            lex_hits = self.store.lexical_search(query, self.cfg.recall_k, metadata_filter)
+            lex_hits = self.store.lexical_search(
+                query, self.cfg.recall_k, metadata_filter, tenant_id, principals)
             qvec = self.embedder.encode_one(query)
             durable = self._fuse(vec_hits, lex_hits, qvec)
         else:

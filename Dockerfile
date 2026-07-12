@@ -13,5 +13,5 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 EXPOSE 8000
 
-# Serves contextx.service:app once Batch 3 lands; until then this is the entrypoint.
-CMD ["uvicorn", "contextx.service:app", "--host", "0.0.0.0", "--port", "8000"]
+# Factory mode: the app is built at startup (loads models once), not at import.
+CMD ["uvicorn", "--factory", "contextx.service:create_app", "--host", "0.0.0.0", "--port", "8000"]

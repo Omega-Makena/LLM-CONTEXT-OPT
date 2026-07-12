@@ -111,13 +111,19 @@ UNTRUSTED_SOURCES = {
 
 @dataclass
 class Document:
-    """A durable source document to be ingested into the vector store."""
+    """A durable source document to be ingested into the vector store.
+
+    `tenant_id` isolates namespaces; `acl` is a list of principals (users/groups)
+    allowed to read it — empty means readable by anyone in the tenant.
+    """
 
     text: str
     doc_id: str = ""
     source: Source = Source.KNOWLEDGE_BASE
     metadata: dict[str, Any] = field(default_factory=dict)
     timestamp: float = field(default_factory=time.time)
+    tenant_id: str = "default"
+    acl: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.doc_id:
@@ -135,3 +141,5 @@ class Request:
     max_context_tokens: int = 32_000
     reserve_output_tokens: int = 4_000
     metadata_filter: dict[str, Any] = field(default_factory=dict)  # index prefilter
+    tenant_id: str = "default"                       # namespace isolation
+    principals: list[str] = field(default_factory=list)  # requester's user + groups

@@ -72,55 +72,47 @@ class MemoryManager:
                    text TEXT, mtype TEXT, importance REAL,
                    created REAL, last_used REAL, uses INTEGER,
                    ttl_s REAL, fact_key TEXT, fact_value TEXT,
-                   embedding BLOB
+                   embedding BLOB, scope TEXT DEFAULT 'global'
                )"""
         )
+        if "scope" not in {r[1] for r in self._db.execute("PRAGMA table_info(memory)")}:
+            self._db.execute("ALTER TABLE memory ADD COLUMN scope TEXT DEFAULT 'global'")
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_factkey ON memory(fact_key)")
+        self._db.execute("CREATE INDEX IF NOT EXISTS idx_scope ON memory(scope)")
         self._db.commit()
 
     # --- write side --------------------------------------------------------
-    def store(self, record: MemoryRecord) -> None:
+    def store(self, record: MemoryRecord, scope: str = "global") -> None:
         with self._lock:
             emb = self.embedder.encode_one(record.text).astype(np.float32)
             if record.fact_key is not None:
+                # fact_key uniqueness is per-scope, so users don't overwrite each other
                 row = self._db.execute(
-                    "SELECT id FROM memory WHERE fact_key=?", (record.fact_key,)
+                    "SELECT id FROM memory WHERE fact_key=? AND scope=?",
+                    (record.fact_key, scope),
                 ).fetchone()
                 if row is not None:
                     self._db.execute(
                         "UPDATE memory SET text=?, fact_value=?, importance=MAX(importance,?),"
                         " created=?, embedding=? WHERE id=?",
-                        (
-                            record.text,
-                            record.fact_value,
-                            record.importance,
-                            record.created,
-                            emb.tobytes(),
-                            row[0],
-                        ),
+                        (record.text, record.fact_value, record.importance,
+                         record.created, emb.tobytes(), row[0]),
                     )
                     self._db.commit()
                     return
             self._db.execute(
                 "INSERT INTO memory (text, mtype, importance, created, last_used, uses,"
-                " ttl_s, fact_key, fact_value, embedding) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    record.text,
-                    record.mtype.value,
-                    record.importance,
-                    record.created,
-                    record.last_used,
-                    record.uses,
-                    record.ttl_s,
-                    record.fact_key,
-                    record.fact_value,
-                    emb.tobytes(),
-                ),
+                " ttl_s, fact_key, fact_value, embedding, scope) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (record.text, record.mtype.value, record.importance, record.created,
+                 record.last_used, record.uses, record.ttl_s, record.fact_key,
+                 record.fact_value, emb.tobytes(), scope),
             )
             self._db.commit()
             self._enforce_bound()
 
-    def extract_and_store(self, request_text: str, answer: str) -> list[MemoryRecord]:
+    def extract_and_store(
+        self, request_text: str, answer: str, scope: str = "global"
+    ) -> list[MemoryRecord]:
         """Heuristic fact extractor (illustrative — replace with an LLM extractor).
 
         Captures the exchange as episodic memory and pulls simple "X uses/prefers/
@@ -132,7 +124,7 @@ class MemoryManager:
             mtype=MemoryType.EPISODIC,
             importance=0.4,
         )
-        self.store(episodic)
+        self.store(episodic, scope=scope)
         new.append(episodic)
 
         low = request_text.lower()
@@ -146,7 +138,7 @@ class MemoryManager:
                     fact_key=f"{subj.strip().lower()}{verb.strip()}",
                     fact_value=obj.strip().rstrip(".").split(".")[0][:60],
                 )
-                self.store(rec)
+                self.store(rec, scope=scope)
                 new.append(rec)
                 break
         return new
@@ -162,13 +154,16 @@ class MemoryManager:
         return self.forget("ttl_s IS NOT NULL AND (? - created) > ttl_s", (now,))
 
     # --- read side ---------------------------------------------------------
-    def retrieve(self, query: str, top_k: int | None = None) -> list[ContextItem]:
+    def retrieve(
+        self, query: str, top_k: int | None = None, scope: str = "global"
+    ) -> list[ContextItem]:
         top_k = top_k or self.cfg.memory_read_k
         with self._lock:
             self.expire()
             rows = self._db.execute(
                 "SELECT id, text, mtype, importance, created, last_used, fact_key,"
-                " fact_value, embedding FROM memory"
+                " fact_value, embedding FROM memory WHERE scope=?",
+                (scope,),
             ).fetchall()
             if not rows:
                 return []

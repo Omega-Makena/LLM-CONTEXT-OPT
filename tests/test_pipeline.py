@@ -184,6 +184,64 @@ def test_citations_and_confidence_fields(cfg):
         assert res.sources[0]["doc_id"] == "pg"
 
 
+def test_tenant_isolation(cfg):
+    engine = ContextEngine(config=cfg)
+    engine.ingest([
+        Document(text="Acme's revenue was 5 million last year.", doc_id="a", tenant_id="acme"),
+        Document(text="Globex secret roadmap for Q3.", doc_id="g", tenant_id="globex"),
+    ])
+    # a query in tenant 'acme' must never see globex's docs
+    hits = engine.store.search("secret roadmap revenue", 10, tenant_id="acme")
+    assert hits and all(h.metadata["tenant_id"] == "acme" for h in hits)
+    assert all("Globex" not in h.text for h in hits)
+
+
+def test_acl_permission_filtering(cfg):
+    engine = ContextEngine(config=cfg)
+    engine.ingest([
+        Document(text="Public onboarding guide.", doc_id="pub", tenant_id="t"),
+        Document(text="Confidential exec compensation memo.", doc_id="sec",
+                 tenant_id="t", acl=["execs"]),
+    ])
+    # a non-exec principal cannot retrieve the ACL-restricted doc
+    hits = engine.store.search("compensation memo guide", 10,
+                               tenant_id="t", principals={"employees"})
+    assert all(h.metadata["doc_id"] != "sec" for h in hits)
+    # an exec can
+    hits2 = engine.store.search("compensation memo", 10,
+                                tenant_id="t", principals={"execs"})
+    assert any(h.metadata["doc_id"] == "sec" for h in hits2)
+
+
+def test_memory_scope_isolation(tmp_path):
+    cfg = Config(memory_db_path=str(tmp_path / "m.db"))
+    mem = MemoryManager(Embedder(), cfg)
+    mem.store(MemoryRecord(text="Alice loves Rust.", mtype=MemoryType.LONG_TERM,
+                           importance=0.8), scope="t:alice")
+    mem.store(MemoryRecord(text="Bob loves Go.", mtype=MemoryType.LONG_TERM,
+                           importance=0.8), scope="t:bob")
+    alice = mem.retrieve("favorite language", scope="t:alice")
+    assert any("Alice" in h.text for h in alice)
+    assert all("Bob" not in h.text for h in alice)
+
+
+def test_service_endpoints(cfg):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from contextx.service import create_app
+    app = create_app(ContextEngine(config=cfg))
+    client = TestClient(app)
+    assert client.get("/health").json()["status"] == "ok"
+    r = client.post("/ingest", json={"documents": [
+        {"text": "Redis is an in-memory data store.", "doc_id": "r"}]})
+    assert r.json()["chunks_added"] >= 1
+    q = client.post("/query", json={"user_message": "what is redis?"})
+    body = q.json()
+    assert "answer" in body and "sources" in body
+    d = client.delete("/documents/r")
+    assert d.json()["chunks_removed"] >= 1
+
+
 def test_ranker_prefers_pinned_and_similar(cfg):
     ranker = Ranker(cfg)
     req = Request(user_message="database choice")
