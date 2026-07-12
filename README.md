@@ -4,6 +4,9 @@ Turns a raw user request plus scattered sources into **one tight, validated,
 in-budget prompt** for an LLM — then calls the model. Built around the
 **ingest/query split** so retrieval cost is independent of corpus size.
 
+> **Domain packs:** a finance preset (capital markets · payments · lending ·
+> compliance/KYC-AML) ships in `contextx/domains/` — see [FINANCE.md](FINANCE.md).
+
 ```
 INGEST (amortized):  documents → chunk → embed → persistent FAISS HNSW index
 QUERY  (per request): Collect → Retrieve → Rerank → Rank → Filter → Compress

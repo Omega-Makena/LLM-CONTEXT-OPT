@@ -28,10 +28,13 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
-def redact_pii(text: str) -> tuple[str, dict[str, int]]:
-    """Return (redacted_text, {type: count})."""
+def redact_pii(
+    text: str, extra_patterns: list[tuple[str, re.Pattern]] | None = None
+) -> tuple[str, dict[str, int]]:
+    """Return (redacted_text, {type: count}). `extra_patterns` lets a domain add
+    its own sensitive identifiers (e.g. finance: IBAN/SWIFT/routing/account)."""
     counts: dict[str, int] = {}
-    for label, pat in _PATTERNS:
+    for label, pat in [*(extra_patterns or []), *_PATTERNS]:
         n = 0
 
         def _sub(_m, _label=label):

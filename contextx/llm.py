@@ -101,7 +101,7 @@ class LLM:
 
     # --- mock -------------------------------------------------------------
     def _mock(self, system, user: str) -> LLMResponse:
-        bullets = re.findall(r"^- (.+)$", user, flags=re.MULTILINE)
+        bullets = re.findall(r"^(?:- |\[\d+\] )(.+)$", user, flags=re.MULTILINE)
         req = re.search(r"<user_request>\s*(.+?)\s*</user_request>", user, re.DOTALL)
         question = req.group(1).strip() if req else "(no request found)"
         top = bullets[:4]
