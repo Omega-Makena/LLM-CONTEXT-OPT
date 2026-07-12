@@ -49,22 +49,63 @@ class Retriever:
         self.backend = store.backend
 
     def retrieve(
-        self, query: str, ephemeral: list[ContextItem], metadata_filter: dict | None = None
+        self,
+        query: str,
+        ephemeral: list[ContextItem],
+        metadata_filter: dict | None = None,
+        hybrid: bool | None = None,
     ) -> list[ContextItem]:
-        # 1) durable recall from the persistent index
-        durable = self.store.search(query, self.cfg.recall_k, metadata_filter)
+        hybrid = self.cfg.enable_hybrid if hybrid is None else hybrid
+
+        # 1) durable recall — semantic ANN, fused with a BM25 lexical channel so
+        #    lexical-only matches (exact IDs, rare tokens) aren't lost at recall.
+        vec_hits = self.store.search(query, self.cfg.recall_k, metadata_filter)
+        if hybrid and self.store.fts_enabled:
+            lex_hits = self.store.lexical_search(query, self.cfg.recall_k, metadata_filter)
+            qvec = self.embedder.encode_one(query)
+            durable = self._fuse(vec_hits, lex_hits, qvec)
+        else:
+            durable = vec_hits
 
         # 2) ephemeral items: embed inline (small N) and score against the query
         ephemeral = self._score_ephemeral(query, ephemeral)
-
-        # keep the strongest ephemeral items so they don't drown the recall set
         ephemeral.sort(key=lambda it: it.similarity, reverse=True)
-        ephemeral = ephemeral[: self.cfg.ephemeral_k]
+        ephemeral = [
+            e for e in ephemeral[: self.cfg.ephemeral_k]
+            if e.similarity >= self.cfg.min_similarity
+        ]
+        return durable + ephemeral
 
-        candidates = durable + ephemeral
-        # drop obvious non-matches early
-        candidates = [c for c in candidates if c.similarity >= self.cfg.min_similarity]
-        return candidates
+    def _fuse(
+        self, vec_hits: list[ContextItem], lex_hits: list[ContextItem], qvec
+    ) -> list[ContextItem]:
+        """Reciprocal-rank fusion of the two recall channels, deduped by chunk."""
+        rrf: dict[str, float] = {}
+        items: dict[str, ContextItem] = {}
+
+        def key(it: ContextItem) -> str:
+            return it.metadata.get("chunk_id") or it.item_id
+
+        for rank, it in enumerate(vec_hits):
+            cid = key(it)
+            rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (self.cfg.rrf_k + rank + 1)
+            items[cid] = it  # vector item already carries similarity
+        for rank, it in enumerate(lex_hits):
+            cid = key(it)
+            rrf[cid] = rrf.get(cid, 0.0) + 1.0 / (self.cfg.rrf_k + rank + 1)
+            items.setdefault(cid, it)
+
+        fused: list[ContextItem] = []
+        for cid, score in rrf.items():
+            it = items[cid]
+            it.rrf_score = score
+            # lexical-only items arrive with similarity 0 — set cosine so the
+            # downstream ranker can still use the semantic signal.
+            if it.similarity == 0.0 and it.embedding is not None:
+                it.similarity = float(it.embedding @ qvec)
+            fused.append(it)
+        fused.sort(key=lambda x: x.rrf_score, reverse=True)
+        return fused[: self.cfg.recall_k]
 
     def _score_ephemeral(self, query: str, items: list[ContextItem]) -> list[ContextItem]:
         to_embed = [it for it in items if it.embedding is None]

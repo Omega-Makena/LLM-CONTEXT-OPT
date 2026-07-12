@@ -67,7 +67,9 @@ class ContextItem:
     # populated as the item flows through the pipeline
     embedding: Any = None          # np.ndarray | None
     similarity: float = 0.0        # cosine to the query (stage 2)
-    rerank_score: float = 0.0      # cross-encoder relevance (stage 2b)
+    rerank_score: float = 0.0      # cross-encoder relevance, normalized 0..1 (stage 2b)
+    raw_rerank_score: float = 0.0  # cross-encoder logit, un-normalized (for abstention)
+    rrf_score: float = 0.0         # reciprocal-rank-fusion score (hybrid recall)
     score: float = 0.0             # composite rank score (stage 3)
     importance: float = 0.0        # pinned / critical weight (stage 3/5)
     tokens: int = 0                # counted in stage 7

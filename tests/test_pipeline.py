@@ -125,6 +125,65 @@ def test_injection_flagged(cfg):
     assert res.trace.metrics["injection_flags"] >= 0
 
 
+def test_delete_and_update(cfg):
+    engine = ContextEngine(config=cfg)
+    engine.ingest([
+        Document(text="Alpha fact about widgets and sprockets.", doc_id="d1"),
+        Document(text="Beta fact about gadgets.", doc_id="d2"),
+    ])
+    assert engine.store.stats()["chunks"] == 2
+    assert engine.delete("d1") == 1
+    assert engine.store.stats()["chunks"] == 1
+    assert all(h.metadata["doc_id"] != "d1" for h in engine.store.search("widgets", 5))
+    # update replaces content by doc_id
+    engine.update([Document(text="Beta fact about gizmos now.", doc_id="d2")])
+    assert engine.store.stats()["chunks"] == 1
+    assert any("gizmos" in h.text for h in engine.store.search("gizmos", 5))
+
+
+def test_delete_then_add_row_alignment(cfg):
+    # deleting tombstones vectors; a subsequent add must not collide on row ids
+    engine = ContextEngine(config=cfg)
+    engine.ingest([Document(text=f"doc number {i} content", doc_id=f"d{i}") for i in range(6)])
+    engine.delete("d2")
+    engine.ingest([Document(text="a brand new document about penguins", doc_id="new")])
+    hits = engine.store.search("penguins", 5)
+    assert any(h.metadata["doc_id"] == "new" for h in hits)
+
+
+def test_model_version_guard(tmp_path):
+    from contextx.store import ModelMismatchError, VectorStore
+    idx = str(tmp_path / "idx")
+    s = VectorStore(Embedder("modelA", force_fallback=True), Config(index_dir=idx))
+    s.add_documents([Document(text="hello world", doc_id="x")])
+    with pytest.raises(ModelMismatchError):
+        VectorStore(Embedder("modelB", force_fallback=True), Config(index_dir=idx))
+
+
+def test_lexical_channel_finds_rare_token(cfg):
+    engine = ContextEngine(config=cfg)
+    if not engine.store.fts_enabled:
+        pytest.skip("sqlite FTS5 not available")
+    engine.ingest([
+        Document(text="The error code XZ9000 indicates a disk failure.", doc_id="err"),
+        Document(text="Completely unrelated notes about gardening in spring.", doc_id="g"),
+    ])
+    hits = engine.store.lexical_search("XZ9000", 5)
+    assert any(h.metadata["doc_id"] == "err" for h in hits)
+
+
+def test_citations_and_confidence_fields(cfg):
+    engine = ContextEngine(config=cfg)
+    engine.ingest([Document(text="PostgreSQL uses MVCC for concurrency control.", doc_id="pg")])
+    res = engine.run(Request(
+        user_message="how does postgres handle concurrency?",
+        max_context_tokens=3000, reserve_output_tokens=800))
+    assert isinstance(res.low_confidence, bool)
+    if res.sources:  # retrieved knowledge is numbered + citable
+        assert "[1]" in res.prompt.user
+        assert res.sources[0]["doc_id"] == "pg"
+
+
 def test_ranker_prefers_pinned_and_similar(cfg):
     ranker = Ranker(cfg)
     req = Request(user_message="database choice")

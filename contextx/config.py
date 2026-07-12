@@ -33,6 +33,11 @@ class Config:
     rerank_k: int = 12              # kept after cross-encoder rerank (precision stage)
     ephemeral_k: int = 8            # top inline (conversation/tool/memory) items kept
     min_similarity: float = 0.15
+    enable_hybrid: bool = True      # fuse vector + BM25 lexical recall (RRF)
+    rrf_k: int = 60                 # reciprocal-rank-fusion constant
+    # abstention: if the top RAW cross-encoder score is below this, the retrieval
+    # is flagged low-confidence (the answer path can decline instead of guessing).
+    abstain_below: float = -3.0
 
     # --- ranking weights (linear blend; sum need not be 1) ---------------
     w_rerank: float = 0.55

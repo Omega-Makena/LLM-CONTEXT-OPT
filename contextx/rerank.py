@@ -37,13 +37,16 @@ class Reranker:
             # identity fallback: carry cosine similarity through as the score
             for it in items:
                 it.rerank_score = it.similarity
+                it.raw_rerank_score = it.similarity
             return sorted(items, key=lambda it: it.rerank_score, reverse=True)
 
         pairs = [(query, it.text) for it in items]
-        scores = self._model.predict(pairs)
-        # min-max normalize to 0..1 so it blends with other signals
-        lo, hi = float(min(scores)), float(max(scores))
+        scores = [float(s) for s in self._model.predict(pairs)]
+        # keep the RAW logit (for an absolute abstention threshold) and also a
+        # min-max normalized copy (to blend with the other 0..1 ranking signals).
+        lo, hi = min(scores), max(scores)
         span = (hi - lo) or 1.0
         for it, s in zip(items, scores):
-            it.rerank_score = (float(s) - lo) / span
+            it.raw_rerank_score = s
+            it.rerank_score = (s - lo) / span
         return sorted(items, key=lambda it: it.rerank_score, reverse=True)

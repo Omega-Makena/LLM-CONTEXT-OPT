@@ -14,7 +14,7 @@ Every stage records into a Trace so you can see counts and latency move.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from .budget import BudgetManager
@@ -47,6 +47,8 @@ class PipelineResult:
     prompt: BuiltPrompt
     llm: LLMResponse
     trace: Trace
+    sources: list[dict] = field(default_factory=list)   # citations for the answer
+    low_confidence: bool = False                         # retrieval abstention flag
 
 
 class ContextEngine:
@@ -67,7 +69,10 @@ class ContextEngine:
         self.retriever = Retriever(self.embedder, self.store, self.cfg, self.cache)
         self.reranker = Reranker(self.cfg)
         self.ranker = Ranker(self.cfg)
-        self.filter = Filter(self.cfg.dup_threshold, self.cfg.min_similarity)
+        # similarity cutting happens at retrieval; the filter only dedups /
+        # drops stale / resolves contradictions (so hybrid lexical hits with low
+        # cosine but high rerank aren't wrongly dropped here).
+        self.filter = Filter(self.cfg.dup_threshold, 0.0)
         self.compressor = Compressor(self.embedder, self.cfg)
         self.budget = BudgetManager(self.cfg)
         self.builder = PromptBuilder(self.cfg)
@@ -82,14 +87,23 @@ class ContextEngine:
         """Chunk + embed + persist durable documents. Returns #chunks added."""
         return self.store.add_documents(documents)
 
+    def update(self, documents: list[Document]) -> int:
+        """Replace documents by doc_id (delete old chunks, re-ingest). Keeps the
+        index from going stale when source docs change."""
+        return self.store.update_documents(documents)
+
+    def delete(self, doc_id: str) -> int:
+        """Remove a document and its chunks from the index. Returns #chunks."""
+        return self.store.delete_document(doc_id)
+
     # --- retrieval-only (used by the eval harness) -----------------------
     def recall_candidates(self, query: str, rerank: bool = True) -> list:
         """Return corpus candidates for `query` with `.similarity` (bi-encoder)
-        and, if `rerank`, `.rerank_score` (cross-encoder) populated. No ephemeral
-        context, no memory — pure retrieval over the indexed corpus, so the eval
-        measures retrieval in isolation.
+        and, if `rerank`, `.rerank_score` (cross-encoder) populated. Vector-only
+        (hybrid=False) and no ephemeral/memory, so the eval measures the semantic
+        retrieval + rerank stages in isolation.
         """
-        cands = self.retriever.retrieve(query, [], None)
+        cands = self.retriever.retrieve(query, [], None, hybrid=False)
         if rerank:
             self.reranker.rerank(query, cands)  # sets .rerank_score in place
         return cands
@@ -120,12 +134,19 @@ class ContextEngine:
             rec.notes["backend"] = self.retriever.backend
             rec.notes["from_index"] = sum(1 for c in candidates if "chunk_id" in c.metadata)
 
-        # 2b — Rerank (precision stage over the recall set)
+        # 2b — Rerank (precision stage over the recall set) + abstention check
         with trace.stage("2b rerank", len(candidates)) as rec:
             reranked = self.reranker.rerank(request.user_message, candidates)
             reranked = reranked[: self.cfg.rerank_k]
+            # confidence = the best RAW cross-encoder score; if nothing clears the
+            # bar, flag low-confidence so the answer path can decline to guess.
+            confidence = max((it.raw_rerank_score for it in reranked), default=0.0)
+            low_confidence = bool(reranked) and confidence < self.cfg.abstain_below
             rec.items_out = len(reranked)
             rec.notes["backend"] = self.reranker.backend
+            rec.notes["confidence"] = round(confidence, 2)
+            if low_confidence:
+                rec.notes["low_confidence"] = True
 
         # 3 — Rank (blend signals)
         with trace.stage("3 rank", len(reranked)) as rec:
@@ -207,6 +228,15 @@ class ContextEngine:
             prompt_tokens=report.prompt_tokens,
             context_items_final=len(prompt.included_items),
             injection_flags=len(report.injection_flags),
+            retrieval_confidence=round(confidence, 2),
+            low_confidence=low_confidence,
         )
 
-        return PipelineResult(answer=response.text, prompt=prompt, llm=response, trace=trace)
+        return PipelineResult(
+            answer=response.text,
+            prompt=prompt,
+            llm=response,
+            trace=trace,
+            sources=prompt.sources,
+            low_confidence=low_confidence,
+        )
