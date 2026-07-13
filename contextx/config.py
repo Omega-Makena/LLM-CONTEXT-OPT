@@ -24,6 +24,11 @@ class Config:
 
     # --- persistent index -------------------------------------------------
     index_dir: str = ".contextx_index"
+    # vector backend: "auto" (faiss if installed, else numpy), "faiss", "numpy",
+    # or "pgvector" (experimental — needs Postgres + psycopg).
+    vector_backend: str = "auto"
+    pg_dsn: str = "postgresql://localhost/contextx"
+    pg_table: str = "contextx_vectors"
     hnsw_M: int = 32                # graph degree; higher = better recall, more RAM
     hnsw_ef_construction: int = 200
     hnsw_ef_search: int = 64        # query-time recall/latency tradeoff

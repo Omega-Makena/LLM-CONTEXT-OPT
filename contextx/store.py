@@ -27,6 +27,7 @@ from typing import Any
 
 import numpy as np
 
+from .backends import make_backend
 from .chunking import chunk_text
 from .config import Config
 from .embeddings import Embedder
@@ -47,15 +48,8 @@ class VectorStore:
         self.dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 
-        self._index = None
-        self._matrix: np.ndarray | None = None
-        self.backend = "numpy"
-        try:
-            import faiss  # noqa: F401
-
-            self.backend = "faiss"
-        except Exception:
-            self.backend = "numpy"
+        self.vindex = make_backend(self.cfg)
+        self.backend = self.vindex.name
 
         self._db = sqlite3.connect(str(self.dir / "chunks.db"), check_same_thread=False)
         self._db.execute("PRAGMA journal_mode=WAL;")
@@ -136,10 +130,11 @@ class VectorStore:
                 return 0
 
             vecs = self.embedder.encode(new_texts)
-            self._ensure_index(vecs.shape[1])
             start_row = self._vector_count()  # next append position (survives deletes)
+            row_ids: list[int] = []
             for offset, (row, vec) in enumerate(zip(rows, vecs)):
                 r = start_row + offset
+                row_ids.append(r)
                 self._db.execute(
                     "INSERT INTO chunks (row, chunk_id, doc_id, source, text, metadata,"
                     " timestamp, tenant_id, acl, embedding) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -149,7 +144,7 @@ class VectorStore:
                     self._db.execute("INSERT INTO chunks_fts(text, row) VALUES(?,?)", (row[3], r))
             self._stamp_model()
             self._db.commit()
-            self._add_vectors(vecs)
+            self.vindex.add(row_ids, vecs)
             self._save()
             return len(new_texts)
 
@@ -198,8 +193,7 @@ class VectorStore:
                 "SELECT chunk_id, doc_id, source, text, metadata, timestamp, tenant_id,"
                 " acl, embedding FROM chunks ORDER BY row"
             ).fetchall()
-            self._index = None
-            self._matrix = None
+            self.vindex.reset()
             self._db.execute("DELETE FROM chunks")
             if self.fts_enabled:
                 self._db.execute("DELETE FROM chunks_fts")
@@ -217,8 +211,7 @@ class VectorStore:
             self._db.commit()
             if vecs:
                 mat = np.vstack(vecs).astype(np.float32)
-                self._ensure_index(mat.shape[1])
-                self._add_vectors(mat)
+                self.vindex.add(list(range(len(vecs))), mat)
             self._save()
 
     # --- query: semantic --------------------------------------------------
@@ -239,7 +232,7 @@ class VectorStore:
             tombs = vcount - self._count()
             # over-fetch: tenant/ACL/metadata filtering happens after ANN search
             fetch = min(vcount, max(k * 8, k + tombs))
-            idxs, sims = self._ann_search(qvec, fetch)
+            idxs, sims = self.vindex.search(qvec, fetch)
             out: list[ContextItem] = []
             for row, sim in zip(idxs, sims):
                 item = self._hydrate(int(row), similarity=float(sim))
@@ -332,38 +325,11 @@ class VectorStore:
         acl = item.metadata.get("acl") or []
         return not acl or bool(set(acl) & principals)
 
-    def _ensure_index(self, dim: int) -> None:
-        if self.backend == "faiss" and self._index is None:
-            import faiss
-
-            index = faiss.IndexHNSWFlat(dim, self.cfg.hnsw_M, faiss.METRIC_INNER_PRODUCT)
-            index.hnsw.efConstruction = self.cfg.hnsw_ef_construction
-            index.hnsw.efSearch = self.cfg.hnsw_ef_search
-            self._index = index
-
-    def _add_vectors(self, vecs: np.ndarray) -> None:
-        vecs = vecs.astype(np.float32)
-        if self.backend == "faiss":
-            self._index.add(vecs)
-        else:
-            self._matrix = vecs if self._matrix is None else np.vstack([self._matrix, vecs])
-
-    def _ann_search(self, qvec: np.ndarray, k: int):
-        if self.backend == "faiss":
-            self._index.hnsw.efSearch = max(self.cfg.hnsw_ef_search, k)
-            sims, idxs = self._index.search(qvec.reshape(1, -1), k)
-            return idxs[0], sims[0]
-        sims = self._matrix @ qvec
-        top = np.argsort(sims)[::-1][:k]
-        return top, sims[top]
-
     def _count(self) -> int:
         return self._db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
 
     def _vector_count(self) -> int:
-        if self.backend == "faiss":
-            return self._index.ntotal if self._index is not None else 0
-        return self._matrix.shape[0] if self._matrix is not None else 0
+        return self.vindex.count()
 
     def _tombstone_ratio(self) -> float:
         vc = self._vector_count()
@@ -371,24 +337,10 @@ class VectorStore:
 
     # --- persistence ------------------------------------------------------
     def _save(self) -> None:
-        if self.backend == "faiss" and self._index is not None:
-            import faiss
-
-            faiss.write_index(self._index, str(self.dir / "index.faiss"))
-        elif self._matrix is not None:
-            np.save(self.dir / "matrix.npy", self._matrix)
+        self.vindex.save(self.dir)
 
     def _load(self) -> None:
-        if self.backend == "faiss":
-            p = self.dir / "index.faiss"
-            if p.exists():
-                import faiss
-
-                self._index = faiss.read_index(str(p))
-        else:
-            p = self.dir / "matrix.npy"
-            if p.exists():
-                self._matrix = np.load(p)
+        self.vindex.load(self.dir)
 
 
 from .types import UNTRUSTED_SOURCES as _UNTRUSTED  # noqa: E402
