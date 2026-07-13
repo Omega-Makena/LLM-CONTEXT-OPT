@@ -97,16 +97,24 @@ class ContextEngine:
     # --- ingest (amortized) ----------------------------------------------
     def ingest(self, documents: list[Document]) -> int:
         """Chunk + embed + persist durable documents. Returns #chunks added."""
-        return self.store.add_documents(documents)
+        n = self.store.add_documents(documents)
+        if n:
+            self.cache.invalidate_responses()  # corpus changed -> drop stale answers
+        return n
 
     def update(self, documents: list[Document]) -> int:
         """Replace documents by doc_id (delete old chunks, re-ingest). Keeps the
         index from going stale when source docs change."""
-        return self.store.update_documents(documents)
+        n = self.store.update_documents(documents)
+        self.cache.invalidate_responses()
+        return n
 
     def delete(self, doc_id: str) -> int:
         """Remove a document and its chunks from the index. Returns #chunks."""
-        return self.store.delete_document(doc_id)
+        n = self.store.delete_document(doc_id)
+        if n:
+            self.cache.invalidate_responses()
+        return n
 
     # --- retrieval-only (used by the eval harness) -----------------------
     def recall_candidates(self, query: str, rerank: bool = True) -> list:
@@ -244,9 +252,10 @@ class ContextEngine:
 
         # 11 — Metrics (incl. estimated dollar cost; local/mock backends are free)
         cost = estimate_cost(
-            request.model, response.input_tokens, response.output_tokens,
+            response.model or request.model,
+            response.input_tokens, response.output_tokens,
             response.cache_read_tokens, response.cache_write_tokens,
-        ) if response.backend == "anthropic" else 0.0
+        ) if response.backend in ("anthropic", "openai") else 0.0
         trace.metrics.update(
             request_id=trace.request_id,
             embed_backend=self.embedder.backend,

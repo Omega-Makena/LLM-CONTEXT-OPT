@@ -72,11 +72,16 @@ class Config:
     semantic_cache_threshold: float = 0.97  # response cache near-dup match
 
     # --- llm --------------------------------------------------------------
-    # provider: "auto" picks anthropic (if ANTHROPIC_API_KEY) -> ollama (if a
-    # local server is reachable) -> mock. Force one with "anthropic"/"ollama"/"mock".
+    # provider: "auto" picks anthropic (ANTHROPIC_API_KEY) -> openai
+    # (OPENAI_API_KEY) -> ollama (local server reachable) -> mock. Force one with
+    # "anthropic" / "openai" / "ollama" / "mock".
     llm_provider: str = "auto"
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"     # falls back to the first pulled model
+    # OpenAI-compatible: works for OpenAI, Azure OpenAI, OpenRouter, vLLM, LM
+    # Studio, etc. by changing the base URL. Key read from OPENAI_API_KEY.
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_model: str = "gpt-4o-mini"
     llm_max_tokens: int = 1024
     llm_timeout_s: float = 60.0
     llm_max_retries: int = 4

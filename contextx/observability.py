@@ -18,10 +18,17 @@ from dataclasses import dataclass, field
 # USD per 1M tokens (input, output). Cache reads are billed at ~10% of input.
 # Update as pricing changes; unknown models fall back to a mid estimate.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
+    # Anthropic
     "claude-opus-4-8": (15.0, 75.0),
     "claude-sonnet-5": (3.0, 15.0),
     "claude-haiku-4-5-20251001": (0.80, 4.0),
     "claude-fable-5": (3.0, 15.0),
+    # OpenAI
+    "gpt-4o": (2.5, 10.0),
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4.1": (2.0, 8.0),
+    "gpt-4.1-mini": (0.40, 1.60),
+    "o4-mini": (1.10, 4.40),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 

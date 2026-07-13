@@ -29,6 +29,7 @@ from .config import Config
 class LLMResponse:
     text: str
     backend: str
+    model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
@@ -59,6 +60,8 @@ class LLM:
         if provider == "auto":
             if os.environ.get("ANTHROPIC_API_KEY"):
                 provider = "anthropic"
+            elif os.environ.get("OPENAI_API_KEY"):
+                provider = "openai"
             elif self._ollama_reachable():
                 provider = "ollama"
             else:
@@ -76,6 +79,8 @@ class LLM:
                 return "anthropic"
             except Exception:
                 pass
+        if provider == "openai" and os.environ.get("OPENAI_API_KEY"):
+            return "openai"
         if provider == "ollama":
             self._resolve_ollama_model()
             return "ollama"
@@ -104,6 +109,8 @@ class LLM:
     def complete(self, system, user: str) -> LLMResponse:
         if self.backend == "anthropic":
             return self._anthropic(system, user)
+        if self.backend == "openai":
+            return self._openai(_system_text(system), user)
         if self.backend == "ollama":
             return self._ollama(_system_text(system), user)
         return self._mock(system, user)
@@ -123,7 +130,7 @@ class LLM:
                 text = "".join(b.text for b in msg.content if b.type == "text")
                 u = msg.usage
                 return LLMResponse(
-                    text=text, backend="anthropic",
+                    text=text, backend="anthropic", model=self.model,
                     input_tokens=u.input_tokens, output_tokens=u.output_tokens,
                     cache_read_tokens=getattr(u, "cache_read_input_tokens", 0) or 0,
                     cache_write_tokens=getattr(u, "cache_creation_input_tokens", 0) or 0,
@@ -135,6 +142,40 @@ class LLM:
                     break
                 time.sleep(self.cfg.llm_backoff_base_s * (2**attempt) + random.uniform(0, 0.3))
         raise RuntimeError(f"Anthropic call failed after retries: {last}")
+
+    # --- openai-compatible (stdlib HTTP) ----------------------------------
+    def _openai(self, system: str, user: str) -> LLMResponse:
+        key = os.environ.get("OPENAI_API_KEY", "")
+        body = json.dumps({
+            "model": self.cfg.openai_model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "max_tokens": self.cfg.llm_max_tokens,
+        }).encode("utf-8")
+        last = None
+        for attempt in range(self.cfg.llm_max_retries + 1):
+            try:
+                req = urllib.request.Request(
+                    self.cfg.openai_base_url.rstrip("/") + "/chat/completions",
+                    data=body,
+                    headers={"Content-Type": "application/json",
+                             "Authorization": f"Bearer {key}"})
+                with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout_s) as r:
+                    data = json.loads(r.read())
+                usage = data.get("usage", {})
+                return LLMResponse(
+                    text=data["choices"][0]["message"]["content"],
+                    backend="openai", model=self.cfg.openai_model,
+                    input_tokens=usage.get("prompt_tokens", 0),
+                    output_tokens=usage.get("completion_tokens", 0),
+                    retries=attempt,
+                )
+            except (urllib.error.URLError, TimeoutError, ConnectionError, KeyError) as exc:
+                last = exc
+                if attempt >= self.cfg.llm_max_retries:
+                    break
+                time.sleep(self.cfg.llm_backoff_base_s * (2**attempt) + random.uniform(0, 0.3))
+        raise RuntimeError(f"OpenAI call failed after retries: {last}")
 
     # --- ollama (local, stdlib HTTP) --------------------------------------
     def _ollama(self, system: str, user: str) -> LLMResponse:
@@ -155,7 +196,7 @@ class LLM:
                     data = json.loads(r.read())
                 return LLMResponse(
                     text=data.get("message", {}).get("content", ""),
-                    backend="ollama",
+                    backend="ollama", model=self.ollama_model,
                     input_tokens=data.get("prompt_eval_count", 0),
                     output_tokens=data.get("eval_count", 0),
                     retries=attempt,

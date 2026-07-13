@@ -33,10 +33,13 @@ pytest tests/                   # unit + integration
 pip install -e ".[full]"
 ```
 
-**LLM backends** — `Config.llm_provider` is `"auto"`: it uses **Claude** if
-`ANTHROPIC_API_KEY` is set, else a local **Ollama** server if reachable, else a
-mock. To use Ollama: `ollama serve` and `ollama pull llama3.1` (override the
-model with `Config(ollama_model=...)`). No key, no cost, fully local.
+**LLM backends** — pluggable: **Claude**, **OpenAI**, local **Ollama**, or a
+mock. `Config.llm_provider="auto"` resolves Claude (`ANTHROPIC_API_KEY`) →
+OpenAI (`OPENAI_API_KEY`) → Ollama (local server reachable) → mock; force any
+with `llm_provider="anthropic"|"openai"|"ollama"|"mock"`. The OpenAI backend is
+OpenAI-compatible, so `Config(openai_base_url=...)` also targets Azure OpenAI,
+OpenRouter, vLLM, or LM Studio. Ollama: `ollama serve && ollama pull llama3.1` —
+no key, no cost, fully local.
 
 Runs with **zero installs** via fallbacks and upgrades transparently as each
 backend appears. The trace footer shows which backend each stage actually used.

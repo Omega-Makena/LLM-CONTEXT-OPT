@@ -35,6 +35,42 @@ def test_llm_ollama_selected_and_degrades():
     assert "ollama unavailable" in r.text
 
 
+def test_openai_backend_selection(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    # no key -> forced openai degrades to mock
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert LLM(Config(llm_provider="openai")).backend == "mock"
+    # with key -> selects openai (no call made)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    assert LLM(Config(llm_provider="openai")).backend == "openai"
+    # auto prefers a key-based provider over local ollama
+    assert LLM(Config(llm_provider="auto")).backend == "openai"
+
+
+def test_cache_invalidate_responses():
+    import numpy as np
+    from contextx.cache import Cache
+    c = Cache()
+    c.get_or_compute("llm", "k1", lambda: "old-answer")
+    c.semantic_get_or_compute("llm", np.ones(4, dtype=np.float32) / 2, "k2", lambda: "x")
+    assert any(k.startswith("llm:") for k in c._store)
+    c.invalidate_responses()
+    assert not any(k.startswith("llm:") for k in c._store)
+    assert c._sem_vecs == []
+
+
+def test_engine_update_invalidates_response_cache(tmp_path):
+    from contextx import ContextEngine, Request
+    cfg = Config(index_dir=str(tmp_path / "idx"), memory_db_path=str(tmp_path / "m.db"))
+    engine = ContextEngine(config=cfg)
+    engine.ingest([Document(text="The vault code is ALPHA.", doc_id="v")])
+    engine.run(Request(user_message="what is the vault code?",
+                       max_context_tokens=3000, reserve_output_tokens=800))
+    assert any(k.startswith("llm:") for k in engine.cache._store)  # a response cached
+    engine.update([Document(text="The vault code is OMEGA now.", doc_id="v")])
+    assert not any(k.startswith("llm:") for k in engine.cache._store)  # invalidated
+
+
 def test_load_corpus_jsonl_roundtrip(tmp_path):
     docs = [Document(text="alpha content", doc_id="a"),
             Document(text="beta content", doc_id="b")]

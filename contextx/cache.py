@@ -102,6 +102,15 @@ class Cache:
             self._sem_vecs.clear()
             self._sem_keys.clear()
 
+    def invalidate_responses(self) -> None:
+        """Drop cached LLM responses (exact + semantic). Call when the corpus
+        changes, so an edited/deleted document can't serve a stale answer."""
+        with self._lock:
+            for k in [k for k in self._store if k.startswith("llm:")]:
+                del self._store[k]
+            self._sem_vecs.clear()
+            self._sem_keys.clear()
+
     @property
     def hit_rate(self) -> float:
         total = self.hits + self.misses
