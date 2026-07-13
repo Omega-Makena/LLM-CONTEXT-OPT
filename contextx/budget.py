@@ -3,11 +3,8 @@
 Count tokens, reserve output, trim the lowest-ranked tail to fit the window.
 
 Tokenizer note: `tiktoken` (cl100k) is OpenAI's tokenizer, NOT Claude's, so
-counts drift ~10-20%. We therefore (a) apply a `budget_safety_margin` headroom
-and (b) expose `count_tokens_claude`, which uses Anthropic's official
-`count_tokens` endpoint when a key is present (cached by the caller, since it is
-a network call). Per-item budgeting uses the fast local estimate; the exact
-Claude count is used once on the final prompt in validation.
+counts drift ~10-20%. We therefore apply a `budget_safety_margin` headroom so
+the assembled prompt stays comfortably under the real model limit.
 """
 
 from __future__ import annotations
@@ -30,19 +27,6 @@ def count_tokens(text: str) -> int:
     if _ENC is not None:
         return len(_ENC.encode(text))
     return max(1, (len(text) + 3) // 4)
-
-
-def count_tokens_claude(text: str, model: str, client=None) -> int | None:
-    """Exact Claude token count via the Anthropic API. Returns None if unavailable."""
-    if client is None:
-        return None
-    try:
-        resp = client.messages.count_tokens(
-            model=model, messages=[{"role": "user", "content": text}]
-        )
-        return int(resp.input_tokens)
-    except Exception:
-        return None
 
 
 @dataclass

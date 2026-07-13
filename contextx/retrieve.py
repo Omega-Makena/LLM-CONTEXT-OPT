@@ -19,7 +19,6 @@ import math
 import re
 from collections import Counter
 
-import numpy as np
 
 from .cache import Cache
 from .config import Config

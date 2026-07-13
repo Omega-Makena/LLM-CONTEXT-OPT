@@ -74,7 +74,8 @@ class ContextEngine:
     ) -> None:
         self.cfg = config or Config()
         self.cache = Cache(self.cfg)
-        self.embedder = embedder or Embedder(self.cfg.embed_model)
+        self.embedder = embedder or Embedder(
+            self.cfg.embed_model, batch_size=self.cfg.embed_batch_size)
         self.store = VectorStore(self.embedder, self.cfg)
         self.collector = Collector()
         self.retriever = Retriever(self.embedder, self.store, self.cfg, self.cache)

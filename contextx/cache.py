@@ -14,8 +14,6 @@ Swap the in-memory backing for Redis/diskcache by keeping `get_or_compute`.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import threading
 import time
 from collections import OrderedDict
@@ -24,11 +22,6 @@ from typing import Any, Callable
 import numpy as np
 
 from .config import Config
-
-
-def make_key(*parts: Any) -> str:
-    blob = json.dumps(parts, sort_keys=True, default=str)
-    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
 
 
 class Cache:
@@ -69,6 +62,10 @@ class Cache:
                     if hit is not None:
                         self.hits += 1
                         return hit
+                    # matched a key whose store entry was evicted/expired —
+                    # prune the dead semantic entry instead of leaking it.
+                    self._sem_vecs.pop(j)
+                    self._sem_keys.pop(j)
             self.misses += 1
         value = compute()
         with self._lock:
@@ -76,6 +73,10 @@ class Cache:
             self._put(full, value)
             self._sem_vecs.append(embedding.astype(np.float32))
             self._sem_keys.append(full)
+            # bound the semantic cache like the exact cache (drop oldest)
+            while len(self._sem_vecs) > self.cfg.cache_max_entries:
+                self._sem_vecs.pop(0)
+                self._sem_keys.pop(0)
         return value
 
     # --- internals --------------------------------------------------------

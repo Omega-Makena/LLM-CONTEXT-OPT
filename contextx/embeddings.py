@@ -25,10 +25,11 @@ def _l2_normalize(mat: np.ndarray) -> np.ndarray:
 class Embedder:
     def __init__(
         self, model_name: str = "all-MiniLM-L6-v2", dim: int = 384,
-        force_fallback: bool = False,
+        force_fallback: bool = False, batch_size: int = 64,
     ) -> None:
         self.model_name = model_name
         self.dim = dim
+        self.batch_size = batch_size
         self._model = None
         self.backend = "hash-fallback"
         if force_fallback:
@@ -49,7 +50,8 @@ class Embedder:
             return np.zeros((0, self.dim), dtype=np.float32)
         if self._model is not None:
             vecs = self._model.encode(
-                texts, normalize_embeddings=True, show_progress_bar=False
+                texts, normalize_embeddings=True, show_progress_bar=False,
+                batch_size=self.batch_size,
             )
             return np.asarray(vecs, dtype=np.float32)
         return self._hash_encode(texts)

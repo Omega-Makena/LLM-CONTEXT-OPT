@@ -65,10 +65,14 @@ def tune_weights(engine, examples, k: int = 5, trials: int = 300, seed: int = 0)
             out.append(M.ndcg_at_k(list(rel), ranked, k))
         return float(np.mean(out)) if out else 0.0
 
+    # Normalize the default weights onto the simplex so the baseline and the
+    # searched trials are on the same scale (nDCG is rank-based, so scaling the
+    # weights doesn't change the ranking) and returned weights always sum to 1.
     d = Config()
-    baseline = mean_ndcg(d.w_rerank, d.w_similarity, d.w_bm25)
-    best = baseline
-    best_w = (d.w_rerank, d.w_similarity, d.w_bm25)
+    raw = np.array([d.w_rerank, d.w_similarity, d.w_bm25], dtype=float)
+    base_w = tuple(raw / raw.sum())
+    baseline = mean_ndcg(*base_w)
+    best, best_w = baseline, base_w
     for _ in range(trials):
         wr, ws, wb = rng.dirichlet([1.0, 1.0, 1.0])  # sum to 1
         s = mean_ndcg(wr, ws, wb)

@@ -19,28 +19,55 @@ import threading
 import time
 from pathlib import Path
 
-_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("EMAIL", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")),
-    ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
-    ("CREDIT_CARD", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
-    ("PHONE", re.compile(r"\b(?:\+?\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b")),
-    ("IP", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")),
+def luhn_ok(s: str) -> bool:
+    """Luhn checksum — real card numbers pass; random digit runs almost never do.
+    Prevents redacting arbitrary long numbers (timestamps, quantities, financial
+    figures) as if they were credit cards."""
+    digits = [int(c) for c in s if c.isdigit()]
+    if len(digits) < 13:
+        return False
+    total, parity = 0, len(digits) % 2
+    for i, d in enumerate(digits):
+        if i % 2 == parity:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+# (label, pattern, validator|None). A pattern may expose a named group `v` to
+# redact only that span (keeping a keyword prefix); otherwise the whole match
+# is redacted. Validators gate redaction (e.g. Luhn for cards).
+_PATTERNS: list[tuple] = [
+    ("EMAIL", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), None),
+    ("SSN", re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), None),
+    ("CREDIT_CARD", re.compile(r"\b(?:\d[ -]?){13,19}\b"), luhn_ok),
+    ("PHONE", re.compile(r"\b(?:\+?\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b"), None),
+    ("IP", re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), None),
 ]
 
 
 def redact_pii(
-    text: str, extra_patterns: list[tuple[str, re.Pattern]] | None = None
+    text: str, extra_patterns: list[tuple] | None = None
 ) -> tuple[str, dict[str, int]]:
     """Return (redacted_text, {type: count}). `extra_patterns` lets a domain add
     its own sensitive identifiers (e.g. finance: IBAN/SWIFT/routing/account)."""
     counts: dict[str, int] = {}
-    for label, pat in [*(extra_patterns or []), *_PATTERNS]:
+    for entry in [*(extra_patterns or []), *_PATTERNS]:
+        label, pat = entry[0], entry[1]
+        validator = entry[2] if len(entry) > 2 else None
         n = 0
 
-        def _sub(_m, _label=label):
+        def _sub(m, _label=label, _val=validator):
             nonlocal n
+            has_group = "v" in m.re.groupindex
+            target = m.group("v") if has_group else m.group(0)
+            if _val is not None and not _val(target):
+                return m.group(0)  # failed validation — leave untouched
             n += 1
-            return f"[REDACTED_{_label}]"
+            token = f"[REDACTED_{_label}]"
+            return m.group(0).replace(target, token) if has_group else token
 
         text = pat.sub(_sub, text)
         if n:

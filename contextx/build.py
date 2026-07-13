@@ -48,9 +48,6 @@ class BuiltPrompt:
     included_items: list[ContextItem] = field(default_factory=list)
     sources: list[dict] = field(default_factory=list)  # [{n, doc_id, chunk_id, preview}]
 
-    def as_messages(self) -> list[dict]:
-        return [{"role": "user", "content": self.user}]
-
 
 class PromptBuilder:
     def __init__(self, config: Config | None = None) -> None:

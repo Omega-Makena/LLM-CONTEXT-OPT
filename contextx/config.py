@@ -7,7 +7,7 @@ learned. Construct once and thread through the engine.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -95,5 +95,3 @@ class Config:
 
     # --- observability ----------------------------------------------------
     log_requests: bool = False            # emit a structured JSON line per request
-
-    stop_terms: list[str] = field(default_factory=list)

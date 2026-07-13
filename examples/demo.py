@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from contextx import Config, ContextEngine, Document, Request  # noqa: E402
-from contextx.memory import MemoryManager, MemoryRecord, MemoryType  # noqa: E402
+from contextx.memory import MemoryRecord, MemoryType  # noqa: E402
 from contextx.types import Source  # noqa: E402
 
 

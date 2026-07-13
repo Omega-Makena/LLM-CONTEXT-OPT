@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from contextx import Config, ContextEngine, Request  # noqa: E402
+from contextx import Config, ContextEngine  # noqa: E402
 from contextx.domains.finance import (  # noqa: E402
     FINANCE_SYSTEM_PROMPT, extract_entities, finance_config, redact_financial,
 )

@@ -37,11 +37,14 @@ FINANCE_SYSTEM_PROMPT = (
 )
 
 # Financial sensitive-data patterns (imperfect regex floor; pair with real DLP).
-FINANCE_PII_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("IBAN", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b")),
-    ("SWIFT_BIC", re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b")),
-    ("ROUTING", re.compile(r"\b\d{9}\b")),
-    ("ACCOUNT", re.compile(r"\b\d{8,17}\b")),
+# IBAN/SWIFT are structurally distinctive. Routing/account are bare digit runs,
+# so they are KEYWORD-GATED (redact only the number following a label) — a naive
+# `\d{9}`/`\d{8,17}` would scrub legitimate financial figures (revenue, prices).
+FINANCE_PII_PATTERNS: list[tuple] = [
+    ("IBAN", re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b"), None),
+    ("SWIFT_BIC", re.compile(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b"), None),
+    ("ROUTING", re.compile(r"(?i:routing|aba)\D{0,12}(?P<v>\d{9})\b"), None),
+    ("ACCOUNT", re.compile(r"(?i:account|acct|a/c)\D{0,12}(?P<v>\d{8,17})\b"), None),
 ]
 
 # Entity anchors — tag docs/queries so the lexical channel can exact-match them.

@@ -16,7 +16,7 @@ to evaluate on your real domain data.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..types import Document, Source

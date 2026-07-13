@@ -16,7 +16,6 @@ flagged as the next thing to replace with an LLM extractor.
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import threading
 import time
@@ -170,6 +169,10 @@ class MemoryManager:
             mat = np.frombuffer(b"".join(r[8] for r in rows), dtype=np.float32)
             mat = mat.reshape(len(rows), -1)
             qvec = self.embedder.encode_one(query)
+            if mat.shape[1] != qvec.shape[0]:
+                # embedding model changed since these memories were written —
+                # degrade gracefully instead of crashing on a dim mismatch.
+                return []
             sims = mat @ qvec
             now = time.time()
             scored = []
