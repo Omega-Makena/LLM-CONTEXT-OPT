@@ -28,8 +28,11 @@ import asyncio
 from typing import Any
 
 try:
+    import json as _json
+
     from fastapi import Depends, FastAPI, Header, HTTPException
     from fastapi import Request as HTTPRequest
+    from fastapi.responses import StreamingResponse
     from pydantic import BaseModel, Field
 except Exception as exc:  # pragma: no cover
     raise ImportError(
@@ -156,5 +159,29 @@ def create_app(
             prompt_tokens=result.trace.metrics.get("prompt_tokens", 0),
             tenant_id=ident.tenant_id,
         )
+
+    @app.post("/query/stream")
+    async def query_stream(body: QueryIn, ident: AuthContext = Depends(identity)):
+        req = Request(
+            user_message=body.user_message,
+            tenant_id=ident.tenant_id,
+            principals=ident.principals,
+            conversation=body.conversation,
+            preferences=body.preferences,
+            max_context_tokens=body.max_context_tokens,
+            reserve_output_tokens=body.reserve_output_tokens,
+        )
+        # retrieval/build run in a thread; streaming runs in FastAPI's threadpool
+        result = await asyncio.to_thread(app.state.engine.run_stream, req)
+
+        def sse():
+            meta = {"tenant_id": ident.tenant_id, "sources": result.sources,
+                    "low_confidence": result.low_confidence}
+            yield f"event: meta\ndata: {_json.dumps(meta)}\n\n"
+            for chunk in result.stream:
+                yield f"data: {_json.dumps({'text': chunk})}\n\n"
+            yield "event: done\ndata: {}\n\n"
+
+        return StreamingResponse(sse(), media_type="text/event-stream")
 
     return app

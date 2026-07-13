@@ -62,6 +62,26 @@ class PipelineResult:
     low_confidence: bool = False                         # retrieval abstention flag
 
 
+@dataclass
+class _Prepared:
+    """Everything stages 1-9 produce; shared by run() and run_stream()."""
+    prompt: BuiltPrompt
+    report: Any
+    low_confidence: bool
+    confidence: float
+    scope: str
+    pii_redacted: int
+
+
+@dataclass
+class StreamResult:
+    stream: Any                 # generator yielding answer text chunks
+    sources: list[dict]         # known up front, before streaming
+    low_confidence: bool
+    prompt: BuiltPrompt
+    trace: Trace
+
+
 class ContextEngine:
     def __init__(
         self,
@@ -135,7 +155,68 @@ class ContextEngine:
         self, request: Request, write_memory: bool = True, **ephemeral_sources: Any
     ) -> PipelineResult:
         trace = Trace()
+        prep = self._prepare(request, trace, **ephemeral_sources)
 
+        # 10 — LLM (semantic response cache wraps the call)
+        with trace.stage("10 llm") as rec:
+            if not prep.report.ok:
+                response = LLMResponse(
+                    text="[BLOCKED] validation failed: " + "; ".join(prep.report.errors),
+                    backend="none")
+            else:
+                qvec = self.embedder.encode_one(prep.prompt.user)
+                response = self.cache.semantic_get_or_compute(
+                    "llm", qvec, key=prep.prompt.user[:256],
+                    compute=lambda: self.llm.complete(
+                        prep.prompt.system_blocks, prep.prompt.user))
+            rec.notes["backend"] = response.backend
+            if response.retries:
+                rec.notes["retries"] = response.retries
+
+        # 5 — Memory write (scoped to the requester)
+        if write_memory and prep.report.ok:
+            with trace.stage("5 memory-write") as rec:
+                new = self.memory.extract_and_store(
+                    request.user_message, response.text, scope=prep.scope)
+                rec.notes["stored"] = len(new)
+
+        self._finalize(request, trace, prep, response)
+        return PipelineResult(
+            answer=response.text, prompt=prep.prompt, llm=response, trace=trace,
+            sources=prep.prompt.sources, low_confidence=prep.low_confidence)
+
+    def run_stream(
+        self, request: Request, write_memory: bool = True, **ephemeral_sources: Any
+    ) -> StreamResult:
+        """Like run(), but streams the answer as text chunks. `sources` and
+        `low_confidence` are known before streaming; the response cache is
+        bypassed (you can't cache a half-streamed answer). Memory is written once
+        the stream is fully consumed."""
+        trace = Trace()
+        prep = self._prepare(request, trace, **ephemeral_sources)
+
+        def gen():
+            chunks: list[str] = []
+            if not prep.report.ok:
+                msg = "[BLOCKED] validation failed: " + "; ".join(prep.report.errors)
+                chunks.append(msg)
+                yield msg
+            else:
+                for piece in self.llm.stream(prep.prompt.system_blocks, prep.prompt.user):
+                    chunks.append(piece)
+                    yield piece
+            if write_memory and prep.report.ok:
+                self.memory.extract_and_store(
+                    request.user_message, "".join(chunks), scope=prep.scope)
+
+        return StreamResult(
+            stream=gen(), sources=prep.prompt.sources,
+            low_confidence=prep.low_confidence, prompt=prep.prompt, trace=trace)
+
+    # --- shared prepare (stages 1-9) -------------------------------------
+    def _prepare(
+        self, request: Request, trace: Trace, **ephemeral_sources: Any
+    ) -> _Prepared:
         scope = _memory_scope(request)
         principals = set(request.principals)
 
@@ -226,33 +307,14 @@ class ContextEngine:
             if not report.ok:
                 rec.notes["errors"] = "; ".join(report.errors)
 
-        # 10 — LLM (semantic response cache wraps the call)
-        with trace.stage("10 llm") as rec:
-            if not report.ok:
-                response = LLMResponse(
-                    text="[BLOCKED] validation failed: " + "; ".join(report.errors),
-                    backend="none",
-                )
-            else:
-                qvec = self.embedder.encode_one(prompt.user)
-                response = self.cache.semantic_get_or_compute(
-                    "llm",
-                    qvec,
-                    key=prompt.user[:256],
-                    compute=lambda: self.llm.complete(prompt.system_blocks, prompt.user),
-                )
-            rec.notes["backend"] = response.backend
-            if response.retries:
-                rec.notes["retries"] = response.retries
+        return _Prepared(
+            prompt=prompt, report=report, low_confidence=low_confidence,
+            confidence=confidence, scope=scope, pii_redacted=pii_redacted)
 
-        # 5 — Memory write (scoped to the requester)
-        if write_memory and report.ok:
-            with trace.stage("5 memory-write") as rec:
-                new = self.memory.extract_and_store(
-                    request.user_message, response.text, scope=scope)
-                rec.notes["stored"] = len(new)
-
-        # 11 — Metrics (incl. estimated dollar cost; local/mock backends are free)
+    # --- shared finalize (stage 11: metrics, cost, audit, log) -----------
+    def _finalize(
+        self, request: Request, trace: Trace, prep: _Prepared, response: LLMResponse
+    ) -> None:
         cost = estimate_cost(
             response.model or request.model,
             response.input_tokens, response.output_tokens,
@@ -267,36 +329,25 @@ class ContextEngine:
             indexed_chunks=self.store.stats()["chunks"],
             cache_hit_rate=round(self.cache.hit_rate, 2),
             cache_read_tokens=response.cache_read_tokens,
-            prompt_tokens=report.prompt_tokens,
+            prompt_tokens=prep.report.prompt_tokens,
             output_tokens=response.output_tokens,
             cost_usd=cost,
-            context_items_final=len(prompt.included_items),
-            injection_flags=len(report.injection_flags),
-            pii_redacted=pii_redacted,
-            retrieval_confidence=round(confidence, 2),
-            low_confidence=low_confidence,
+            context_items_final=len(prep.prompt.included_items),
+            injection_flags=len(prep.report.injection_flags),
+            pii_redacted=prep.pii_redacted,
+            retrieval_confidence=round(prep.confidence, 2),
+            low_confidence=prep.low_confidence,
         )
-
-        # audit trail + structured log (both optional)
         if self.audit is not None:
             self.audit.record({
                 "request_id": trace.request_id,
                 "tenant_id": request.tenant_id,
                 "principals": request.principals,
                 "query": request.user_message,
-                "retrieved_chunks": [s.get("chunk_id") for s in prompt.sources],
-                "low_confidence": low_confidence,
+                "retrieved_chunks": [s.get("chunk_id") for s in prep.prompt.sources],
+                "low_confidence": prep.low_confidence,
                 "backend": response.backend,
                 "cost_usd": cost,
             })
         if self.cfg.log_requests:
             print(trace.log_line())
-
-        return PipelineResult(
-            answer=response.text,
-            prompt=prompt,
-            llm=response,
-            trace=trace,
-            sources=prompt.sources,
-            low_confidence=low_confidence,
-        )

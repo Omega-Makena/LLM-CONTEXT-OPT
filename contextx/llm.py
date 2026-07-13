@@ -118,6 +118,78 @@ class LLM:
     def __call__(self, prompt: str) -> str:
         return self.complete("You are a concise summarizer.", prompt).text
 
+    # --- streaming --------------------------------------------------------
+    def stream(self, system, user: str):
+        """Yield the answer as text chunks. Mirrors `complete`'s backend choice."""
+        if self.backend == "anthropic":
+            yield from self._anthropic_stream(system, user)
+        elif self.backend == "openai":
+            yield from self._openai_stream(_system_text(system), user)
+        elif self.backend == "ollama":
+            yield from self._ollama_stream(_system_text(system), user)
+        else:
+            yield from self._mock_stream(system, user)
+
+    def _mock_stream(self, system, user: str):
+        text = self._mock(system, user).text
+        for i, tok in enumerate(text.split(" ")):
+            yield tok if i == 0 else " " + tok
+
+    def _anthropic_stream(self, system, user: str):  # pragma: no cover - needs key
+        with self._client.messages.stream(
+            model=self.model, max_tokens=self.cfg.llm_max_tokens,
+            system=system, messages=[{"role": "user", "content": user}],
+        ) as s:
+            yield from s.text_stream
+
+    def _openai_stream(self, system: str, user: str):  # pragma: no cover - needs key
+        body = json.dumps({
+            "model": self.cfg.openai_model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "max_tokens": self.cfg.llm_max_tokens, "stream": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.cfg.openai_base_url.rstrip("/") + "/chat/completions", data=body,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"})
+        with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout_s) as r:
+            for raw in r:
+                line = raw.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(data)["choices"][0]["delta"].get("content")
+                except Exception:
+                    continue
+                if delta:
+                    yield delta
+
+    def _ollama_stream(self, system: str, user: str):  # pragma: no cover - needs server
+        body = json.dumps({
+            "model": self.ollama_model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "stream": True, "options": {"num_predict": self.cfg.llm_max_tokens},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.cfg.ollama_host + "/api/chat", data=body,
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout_s) as r:
+                for raw in r:
+                    line = raw.strip()
+                    if not line:
+                        continue
+                    piece = json.loads(line).get("message", {}).get("content", "")
+                    if piece:
+                        yield piece
+        except (urllib.error.URLError, TimeoutError, ConnectionError):
+            yield from self._mock_stream(system, user)  # degrade if server is down
+
     # --- anthropic --------------------------------------------------------
     def _anthropic(self, system, user: str) -> LLMResponse:
         last = None

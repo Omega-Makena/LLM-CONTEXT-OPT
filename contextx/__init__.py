@@ -20,12 +20,13 @@ Quick start:
 """
 
 from .config import Config
-from .pipeline import ContextEngine, PipelineResult
+from .pipeline import ContextEngine, PipelineResult, StreamResult
 from .types import ContextItem, Document, Request, Source
 
 __all__ = [
     "ContextEngine",
     "PipelineResult",
+    "StreamResult",
     "Config",
     "Request",
     "Document",
