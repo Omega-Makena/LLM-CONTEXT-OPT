@@ -76,7 +76,8 @@ metrics + nDCG-tuned weights on *your* domain.
 | Area | Capability |
 |------|-----------|
 | **Correctness** | document **delete/update** with index compaction; **embedding-model version stamping** (refuses a mismatched index); **real hybrid search** (SQLite FTS5 + reciprocal-rank fusion); **citations** + retrieval **abstention** |
-| **Multi-tenancy** | tenant isolation + **permission-filtered retrieval** (ACLs enforced in both recall channels); memory namespaced per user |
+| **Multi-tenancy** | tenant isolation + **permission-filtered retrieval** (ACLs enforced in both recall channels); memory namespaced per user; tenant-scoped delete |
+| **Auth** | **API-key authentication** — tenant + principals resolved server-side from the key (hashed, constant-time), never trusted from the request body; open/dev mode when unconfigured |
 | **Service** | **FastAPI** app (`/ingest`, `/query`, `/documents`, `/health`, `/stats`) running the engine in a threadpool; `Dockerfile` |
 | **Ingestion** | loaders (txt/md/html/pdf); **structure-aware chunking** (headings + atomic code blocks); **incremental sync** (content-hash diff) |
 | **Quality/trust** | **faithfulness/groundedness eval**; **learned rank weights** (nDCG search on labeled data) + feedback capture; **PII redaction** + **audit log** |

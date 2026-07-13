@@ -154,16 +154,25 @@ class VectorStore:
             return len(new_texts)
 
     # --- delete / update --------------------------------------------------
-    def delete_document(self, doc_id: str, auto_rebuild: bool = True) -> int:
-        """Remove all chunks of a document. Vectors are tombstoned in the index
-        and skipped at query time; the index is compacted once tombstones pile
-        up (or call `rebuild()` explicitly). Returns #chunks removed."""
+    def delete_document(
+        self, doc_id: str, auto_rebuild: bool = True, tenant_id: str | None = None
+    ) -> int:
+        """Remove all chunks of a document. If `tenant_id` is given, only that
+        tenant's chunks are removed (so one tenant can't delete another's doc by
+        id). Vectors are tombstoned and skipped at query time; the index compacts
+        once tombstones pile up. Returns #chunks removed."""
         with self._lock:
-            rows = [r[0] for r in self._db.execute(
-                "SELECT row FROM chunks WHERE doc_id=?", (doc_id,))]
+            if tenant_id is None:
+                sql, params = "SELECT row FROM chunks WHERE doc_id=?", (doc_id,)
+                dele = "DELETE FROM chunks WHERE doc_id=?"
+            else:
+                sql = "SELECT row FROM chunks WHERE doc_id=? AND tenant_id=?"
+                params = (doc_id, tenant_id)
+                dele = "DELETE FROM chunks WHERE doc_id=? AND tenant_id=?"
+            rows = [r[0] for r in self._db.execute(sql, params)]
             if not rows:
                 return 0
-            self._db.execute("DELETE FROM chunks WHERE doc_id=?", (doc_id,))
+            self._db.execute(dele, params)
             if self.fts_enabled:
                 self._db.executemany("DELETE FROM chunks_fts WHERE row=?", [(r,) for r in rows])
             self._db.commit()

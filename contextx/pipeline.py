@@ -110,9 +110,10 @@ class ContextEngine:
         self.cache.invalidate_responses()
         return n
 
-    def delete(self, doc_id: str) -> int:
-        """Remove a document and its chunks from the index. Returns #chunks."""
-        n = self.store.delete_document(doc_id)
+    def delete(self, doc_id: str, tenant_id: str | None = None) -> int:
+        """Remove a document and its chunks from the index. Pass `tenant_id` to
+        restrict deletion to that tenant's copy. Returns #chunks."""
+        n = self.store.delete_document(doc_id, tenant_id=tenant_id)
         if n:
             self.cache.invalidate_responses()
         return n
