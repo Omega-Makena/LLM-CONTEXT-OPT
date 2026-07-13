@@ -242,11 +242,11 @@ class ContextEngine:
                     request.user_message, response.text, scope=scope)
                 rec.notes["stored"] = len(new)
 
-        # 11 — Metrics (incl. estimated dollar cost)
+        # 11 — Metrics (incl. estimated dollar cost; local/mock backends are free)
         cost = estimate_cost(
             request.model, response.input_tokens, response.output_tokens,
             response.cache_read_tokens, response.cache_write_tokens,
-        )
+        ) if response.backend == "anthropic" else 0.0
         trace.metrics.update(
             request_id=trace.request_id,
             embed_backend=self.embedder.backend,

@@ -71,7 +71,12 @@ class Config:
     cache_ttl_s: float = 3600.0
     semantic_cache_threshold: float = 0.97  # response cache near-dup match
 
-    # --- llm resilience ---------------------------------------------------
+    # --- llm --------------------------------------------------------------
+    # provider: "auto" picks anthropic (if ANTHROPIC_API_KEY) -> ollama (if a
+    # local server is reachable) -> mock. Force one with "anthropic"/"ollama"/"mock".
+    llm_provider: str = "auto"
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1"     # falls back to the first pulled model
     llm_max_tokens: int = 1024
     llm_timeout_s: float = 60.0
     llm_max_retries: int = 4

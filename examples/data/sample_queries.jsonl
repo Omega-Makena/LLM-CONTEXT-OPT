@@ -1,0 +1,8 @@
+{"query": "nine-character code identifying a North American security", "relevant": ["cusip"]}
+{"query": "twelve-character international securities identifier", "relevant": ["isin"]}
+{"query": "verifying a customer's identity at onboarding", "relevant": ["kyc"]}
+{"query": "detecting and reporting suspicious financial activity", "relevant": ["aml"]}
+{"query": "cross-border bank account identifier", "relevant": ["iban"]}
+{"query": "code identifying a bank in an international wire transfer", "relevant": ["swift"]}
+{"query": "monthly debt payments divided by gross monthly income", "relevant": ["dti"]}
+{"query": "loan amount divided by the value of the collateral", "relevant": ["ltv"]}

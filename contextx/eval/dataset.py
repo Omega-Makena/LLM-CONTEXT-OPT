@@ -323,6 +323,29 @@ def all_doc_ids() -> list[str]:
     return [d.doc_id for d in GOLDEN_CORPUS]
 
 
+def load_corpus_jsonl(path: str) -> list[Document]:
+    """Load a corpus from JSONL: one {"text", "doc_id"?, "metadata"?, "tenant_id"?,
+    "acl"?} object per line."""
+    docs: list[Document] = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        o = json.loads(line)
+        docs.append(Document(
+            text=o["text"], doc_id=o.get("doc_id", ""),
+            metadata=o.get("metadata", {}),
+            tenant_id=o.get("tenant_id", "default"), acl=o.get("acl", []),
+        ))
+    return docs
+
+
+def save_corpus_jsonl(docs: list[Document], path: str) -> None:
+    lines = [json.dumps({"text": d.text, "doc_id": d.doc_id, "metadata": d.metadata})
+             for d in docs]
+    Path(path).write_text("\n".join(lines), encoding="utf-8")
+
+
 def load_jsonl(path: str) -> list[EvalExample]:
     out: list[EvalExample] = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():

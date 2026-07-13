@@ -1,0 +1,22 @@
+{"text": "A CUSIP is a 9-character alphanumeric code that identifies a North American security.", "doc_id": "cusip"}
+{"text": "An ISIN is a 12-character international securities identifier with a two-letter country code and a check digit.", "doc_id": "isin"}
+{"text": "KYC (Know Your Customer) is verifying a customer's identity before and during onboarding.", "doc_id": "kyc"}
+{"text": "AML (Anti-Money-Laundering) rules require firms to detect and report suspicious financial activity.", "doc_id": "aml"}
+{"text": "An IBAN (International Bank Account Number) identifies a specific bank account across borders.", "doc_id": "iban"}
+{"text": "A SWIFT/BIC code identifies a specific bank in international wire transfers.", "doc_id": "swift"}
+{"text": "The debt-to-income (DTI) ratio is total monthly debt payments divided by gross monthly income.", "doc_id": "dti"}
+{"text": "The loan-to-value (LTV) ratio is the loan amount divided by the value of the collateral.", "doc_id": "ltv"}
+{"text": "A US ABA routing number is a 9-digit code identifying a bank for domestic transfers.", "doc_id": "routing"}
+{"text": "The price-to-earnings (P/E) ratio is the share price divided by earnings per share.", "doc_id": "pe_ratio"}
+{"text": "Earnings per share (EPS) is net income divided by the number of shares outstanding.", "doc_id": "eps"}
+{"text": "APR (annual percentage rate) is the annualized cost of a loan including interest and fees.", "doc_id": "apr"}
+{"text": "Collateral is an asset a borrower pledges to secure a loan, seized on default.", "doc_id": "collateral"}
+{"text": "An ETF is a pooled investment fund that trades on an exchange like a stock.", "doc_id": "etf"}
+{"text": "A bond's coupon is the fixed periodic interest payment made on its face value.", "doc_id": "coupon"}
+{"text": "A chargeback is a forced reversal of a card payment initiated by the cardholder's bank.", "doc_id": "chargeback"}
+{"text": "A SAR (Suspicious Activity Report) is filed with regulators when a firm suspects illicit activity.", "doc_id": "sar"}
+{"text": "A CTR (Currency Transaction Report) is filed for cash transactions above a threshold.", "doc_id": "ctr"}
+{"text": "MiFID II is an EU regulation governing investment services and market transparency.", "doc_id": "mifid"}
+{"text": "Basel III sets bank capital and liquidity requirements to strengthen the banking system.", "doc_id": "basel"}
+{"text": "The office espresso machine needs descaling every month.", "doc_id": "noise_coffee"}
+{"text": "The weather forecast predicts rain on Tuesday with highs near 15 degrees.", "doc_id": "noise_weather"}

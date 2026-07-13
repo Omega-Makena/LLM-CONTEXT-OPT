@@ -27,11 +27,16 @@ print(result.trace.report())
 ```
 
 ```bash
-python examples/demo.py     # ingest a corpus, answer a query, print the trace
-pytest tests/               # unit + integration
-pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...   # real answers instead of the mock
+python examples/demo.py         # ingest a corpus, answer a query, print the trace
+python examples/eval_custom.py  # eval + tune retrieval on your own JSONL data
+pytest tests/                   # unit + integration
+pip install -e ".[full]"
 ```
+
+**LLM backends** — `Config.llm_provider` is `"auto"`: it uses **Claude** if
+`ANTHROPIC_API_KEY` is set, else a local **Ollama** server if reachable, else a
+mock. To use Ollama: `ollama serve` and `ollama pull llama3.1` (override the
+model with `Config(ollama_model=...)`). No key, no cost, fully local.
 
 Runs with **zero installs** via fallbacks and upgrades transparently as each
 backend appears. The trace footer shows which backend each stage actually used.
@@ -41,8 +46,13 @@ backend appears. The trace footer shows which backend each stage actually used.
 | Embeddings    | `sentence-transformers`    | deterministic hash embedder       |
 | Vector index  | `faiss-cpu` HNSW (ANN)     | persisted numpy brute-force cosine|
 | Reranker      | cross-encoder              | identity (keep bi-encoder order)  |
-| Generation    | Claude (`anthropic` + key) | extractive mock                   |
+| Generation    | Claude, or local **Ollama**| extractive mock                   |
 | Token count   | `tiktoken` (+ safety margin)| ~4-chars/token heuristic         |
+
+**Bring your own data:** point the eval at your labeled queries —
+`python examples/eval_custom.py --corpus mycorpus.jsonl --queries myqueries.jsonl`
+(`{"text","doc_id"}` and `{"query","relevant":[doc_id]}` per line) — to get IR
+metrics + nDCG-tuned weights on *your* domain.
 
 ## What makes this not a toy
 
