@@ -63,6 +63,20 @@ def test_finance_redaction_keeps_plain_figures():
     assert "12345678" not in red2 and "021000021" not in red2
 
 
+# --- small tenant is not starved by post-filter ANN -----------------------
+def test_small_tenant_not_starved(tmp_path):
+    from contextx.store import VectorStore
+    from contextx.types import Document
+    s = VectorStore(Embedder(force_fallback=True), Config(index_dir=str(tmp_path / "i")))
+    # 60 big-tenant docs all outrank the small tenant's single doc on the query
+    s.add_documents([Document(text=f"big markets trading strategy alpha {i}",
+                              doc_id=f"b{i}", tenant_id="big") for i in range(60)])
+    s.add_documents([Document(text="small markets note", doc_id="s1", tenant_id="small")])
+    # adaptive over-fetch must still surface the small tenant's doc (not [])
+    hits = s.search("markets trading", 5, tenant_id="small")
+    assert [h.metadata["doc_id"] for h in hits] == ["s1"]
+
+
 # --- memory survives an embedding-model change ----------------------------
 def test_memory_dim_mismatch_degrades(tmp_path):
     cfg = Config(memory_db_path=str(tmp_path / "m.db"))

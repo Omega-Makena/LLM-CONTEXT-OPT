@@ -230,22 +230,28 @@ class VectorStore:
                 return []
             qvec = self.embedder.encode_one(query).astype(np.float32)
             tombs = vcount - self._count()
-            # over-fetch: tenant/ACL/metadata filtering happens after ANN search
             fetch = min(vcount, max(k * 8, k + tombs))
-            idxs, sims = self.vindex.search(qvec, fetch)
-            out: list[ContextItem] = []
-            for row, sim in zip(idxs, sims):
-                item = self._hydrate(int(row), similarity=float(sim))
-                if item is None:
-                    continue
-                if not self._authorized(item, tenant_id, principals):
-                    continue
-                if metadata_filter and not _matches(item.metadata, metadata_filter):
-                    continue
-                out.append(item)
-                if len(out) >= k:
-                    break
-            return out
+            # Adaptive over-fetch: tenant/ACL/metadata filtering is post-hoc, so a
+            # small tenant's docs can all sit beyond the first `fetch` neighbours
+            # in a large index. Expand until we have k authorized hits or we've
+            # scanned the whole index — a small tenant is never starved.
+            while True:
+                idxs, sims = self.vindex.search(qvec, fetch)
+                out: list[ContextItem] = []
+                for row, sim in zip(idxs, sims):
+                    item = self._hydrate(int(row), similarity=float(sim))
+                    if item is None:
+                        continue
+                    if not self._authorized(item, tenant_id, principals):
+                        continue
+                    if metadata_filter and not _matches(item.metadata, metadata_filter):
+                        continue
+                    out.append(item)
+                    if len(out) >= k:
+                        break
+                if len(out) >= k or fetch >= vcount:
+                    return out
+                fetch = min(vcount, fetch * 4)
 
     # --- query: lexical (BM25 over FTS5) ----------------------------------
     def lexical_search(
@@ -263,27 +269,33 @@ class VectorStore:
             match = _fts_query(query)
             if not match:
                 return []
-            try:
-                rows = self._db.execute(
-                    "SELECT row FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank"
-                    " LIMIT ?",
-                    (match, k * 8),
-                ).fetchall()
-            except sqlite3.OperationalError:
-                return []
-            out: list[ContextItem] = []
-            for (row,) in rows:
-                item = self._hydrate(int(row))
-                if item is None:
-                    continue
-                if not self._authorized(item, tenant_id, principals):
-                    continue
-                if metadata_filter and not _matches(item.metadata, metadata_filter):
-                    continue
-                out.append(item)
-                if len(out) >= k:
-                    break
-            return out
+            total = self._count()
+            limit = k * 8
+            while True:
+                try:
+                    rows = self._db.execute(
+                        "SELECT row FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY rank"
+                        " LIMIT ?",
+                        (match, limit),
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    return []
+                out: list[ContextItem] = []
+                for (row,) in rows:
+                    item = self._hydrate(int(row))
+                    if item is None:
+                        continue
+                    if not self._authorized(item, tenant_id, principals):
+                        continue
+                    if metadata_filter and not _matches(item.metadata, metadata_filter):
+                        continue
+                    out.append(item)
+                    if len(out) >= k:
+                        break
+                # stop when satisfied, when FTS is exhausted, or the limit covers all
+                if len(out) >= k or len(rows) < limit or limit >= total:
+                    return out
+                limit = min(total, limit * 4)
 
     def stats(self) -> dict:
         return {
