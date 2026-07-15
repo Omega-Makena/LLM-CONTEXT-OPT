@@ -121,6 +121,8 @@ class ContextEngine:
         self.validator = Validator(self.cfg)
         self.memory = memory or MemoryManager(self.embedder, self.cfg)
         self.llm = llm or LLM(self.cfg)
+        if self.cfg.llm_memory_extraction:
+            self.memory.llm = self.llm  # enable LLM fact extraction
         self.system_prompt = system_prompt
         self.abstractive_compression = abstractive_compression
         self.audit = AuditLog(self.cfg.audit_log_path) if self.cfg.audit_log_path else None

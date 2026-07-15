@@ -70,6 +70,7 @@ class Config:
     memory_db_path: str = ".contextx_memory.db"
     memory_max_records: int = 5_000      # bounded; lowest value*recency evicted
     memory_read_k: int = 5
+    llm_memory_extraction: bool = False  # extract facts with the LLM (costs a call/turn)
 
     # --- cache ------------------------------------------------------------
     cache_max_entries: int = 10_000

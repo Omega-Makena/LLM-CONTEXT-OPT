@@ -16,6 +16,7 @@ flagged as the next thing to replace with an LLM extractor.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -59,6 +60,7 @@ class MemoryManager:
     ) -> None:
         self.cfg = config or Config()
         self.embedder = embedder
+        self.llm = None   # optional; set by the engine for LLM fact extraction
         self._lock = threading.RLock()
         self._db = sqlite3.connect(
             path or self.cfg.memory_db_path, check_same_thread=False
@@ -112,11 +114,9 @@ class MemoryManager:
     def extract_and_store(
         self, request_text: str, answer: str, scope: str = "global"
     ) -> list[MemoryRecord]:
-        """Heuristic fact extractor (illustrative — replace with an LLM extractor).
-
-        Captures the exchange as episodic memory and pulls simple "X uses/prefers/
-        likes Y" facts as semantic memories so the lifecycle is demonstrable.
-        """
+        """Capture the exchange as episodic memory and extract durable semantic
+        facts. Uses an LLM extractor when `llm` is set and enabled in config;
+        otherwise a heuristic. Falls back to the heuristic on any LLM failure."""
         new: list[MemoryRecord] = []
         episodic = MemoryRecord(
             text=f"User asked: {request_text.strip()[:200]}",
@@ -126,21 +126,56 @@ class MemoryManager:
         self.store(episodic, scope=scope)
         new.append(episodic)
 
+        facts = None
+        if self.llm is not None and self.cfg.llm_memory_extraction:
+            facts = self._llm_extract(request_text, answer)
+        if facts is None:  # no LLM, disabled, or extraction failed
+            facts = self._heuristic_extract(request_text)
+
+        for rec in facts:
+            self.store(rec, scope=scope)
+            new.append(rec)
+        return new
+
+    def _heuristic_extract(self, request_text: str) -> list[MemoryRecord]:
         low = request_text.lower()
         for verb in (" uses ", " prefers ", " likes "):
             if verb in low:
                 subj, _, obj = request_text.partition(verb)
-                rec = MemoryRecord(
-                    text=request_text.strip(),
-                    mtype=MemoryType.SEMANTIC,
-                    importance=0.7,
+                return [MemoryRecord(
+                    text=request_text.strip(), mtype=MemoryType.SEMANTIC, importance=0.7,
                     fact_key=f"{subj.strip().lower()}{verb.strip()}",
-                    fact_value=obj.strip().rstrip(".").split(".")[0][:60],
-                )
-                self.store(rec, scope=scope)
-                new.append(rec)
-                break
-        return new
+                    fact_value=obj.strip().rstrip(".").split(".")[0][:60])]
+        return []
+
+    def _llm_extract(self, request_text: str, answer: str) -> list[MemoryRecord] | None:
+        """Extract durable user facts via the LLM. Returns None on any failure so
+        the caller can fall back to the heuristic."""
+        prompt = (
+            "From the exchange, extract durable facts about the USER worth "
+            "remembering (preferences, identity, environment, decisions). Return "
+            'ONLY a JSON array; each item {"fact": str, "key": snake_case str, '
+            '"value": str, "importance": 0..1}. Return [] if nothing durable.\n\n'
+            f"User: {request_text.strip()[:1000]}\nAssistant: {answer.strip()[:1000]}"
+        )
+        try:
+            raw = self.llm(prompt)
+            start, end = raw.find("["), raw.rfind("]")
+            if start < 0 or end < 0:
+                return None
+            items = json.loads(raw[start:end + 1])
+            out: list[MemoryRecord] = []
+            for it in items:
+                if not isinstance(it, dict) or not it.get("fact"):
+                    continue
+                out.append(MemoryRecord(
+                    text=str(it["fact"])[:200], mtype=MemoryType.SEMANTIC,
+                    importance=float(it.get("importance", 0.6)),
+                    fact_key=(str(it["key"])[:60] if it.get("key") else None),
+                    fact_value=(str(it["value"])[:120] if it.get("value") else None)))
+            return out
+        except Exception:
+            return None
 
     def forget(self, where_sql: str, params: tuple = ()) -> int:
         with self._lock:

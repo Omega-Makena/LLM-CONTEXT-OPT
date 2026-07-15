@@ -77,6 +77,24 @@ def test_small_tenant_not_starved(tmp_path):
     assert [h.metadata["doc_id"] for h in hits] == ["s1"]
 
 
+# --- LLM-based memory fact extraction -------------------------------------
+def test_llm_fact_extraction(tmp_path):
+    cfg = Config(memory_db_path=str(tmp_path / "m.db"), llm_memory_extraction=True)
+    mem = MemoryManager(Embedder(force_fallback=True), cfg)
+    mem.llm = lambda p: '[{"fact":"User uses PostgreSQL","key":"db","value":"PostgreSQL","importance":0.8}]'
+    new = mem.extract_and_store("we run everything on postgres", "noted", scope="u")
+    facts = [r for r in new if r.mtype == MemoryType.SEMANTIC]
+    assert any(f.fact_value == "PostgreSQL" for f in facts)
+
+
+def test_llm_extraction_falls_back_on_bad_json(tmp_path):
+    cfg = Config(memory_db_path=str(tmp_path / "m.db"), llm_memory_extraction=True)
+    mem = MemoryManager(Embedder(force_fallback=True), cfg)
+    mem.llm = lambda p: "sorry, no json here"
+    new = mem.extract_and_store("the user uses Rust", "ok", scope="u")
+    assert any(r.mtype == MemoryType.SEMANTIC for r in new)  # heuristic fallback fired
+
+
 # --- memory survives an embedding-model change ----------------------------
 def test_memory_dim_mismatch_degrades(tmp_path):
     cfg = Config(memory_db_path=str(tmp_path / "m.db"))
