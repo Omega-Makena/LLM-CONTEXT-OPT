@@ -1,7 +1,6 @@
 # Evaluation
 
-An unmeasured retrieval system is a toy. `contextx/eval/` measures retrieval and
-answer quality so you can defend and tune the engine rather than assume it works.
+`contextx/eval/` measures retrieval and answer quality.
 
 ## Retrieval evaluation
 
@@ -10,14 +9,14 @@ python examples/run_eval.py                 # golden + hard benchmarks
 python examples/eval_custom.py --corpus c.jsonl --queries q.jsonl   # your data
 ```
 
-### The method
-Given a labeled set — queries each annotated with the `doc_id`s that are
-*relevant* (ground truth) — the harness (`eval/harness.py`) runs retrieval under
-several configurations and scores the returned ranking against the labels.
+### Method
+Each query is labeled with the relevant `doc_id`s (ground truth). The harness
+(`eval/harness.py`) runs retrieval under several configurations and scores the
+ranking against the labels.
 
 ### Metrics (`eval/metrics.py`)
-Binary relevance. Reported as **mean with a 95% bootstrap confidence interval**
-over queries (point estimates lie):
+Binary relevance, reported as mean with a 95% bootstrap confidence interval over
+queries:
 
 | Metric | Meaning |
 |---|---|
@@ -36,18 +35,15 @@ Each run compares:
   labels; a sanity control that must collapse toward the floor, proving the
   metric measures true relevance and not an artifact.
 
-There is also a **paired significance** test (`metrics.paired_delta`): because
-bi-encoder and reranker are scored on the *same* queries, the correct comparison
-is a paired bootstrap on per-query differences (far more powerful than comparing
-two marginal CIs). It reports the mean delta, 95% CI, one-sided p-value, and
-win-rate.
+**Paired significance** (`metrics.paired_delta`): bi-encoder and reranker are
+scored on the same queries, so it uses a paired bootstrap on per-query
+differences. Reports mean delta, 95% CI, one-sided p-value, and win-rate.
 
-### Reading results honestly
-- If the **null control** does not collapse, your benchmark is too small/easy to
+### Reading results
+- If the null control does not collapse, the benchmark is too small to
   discriminate — add distractors and hard negatives.
-- If a component (e.g. the reranker) shows no aggregate lift, check whether the
-  bi-encoder already saturates; the value may be concentrated in a hard stratum.
-  Report that, don't hide it.
+- If a component shows no aggregate lift, check whether the bi-encoder already
+  saturates; the effect may be concentrated in a hard stratum.
 
 ## Bring your own data
 

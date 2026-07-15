@@ -17,21 +17,15 @@ understand *how* it optimizes an LLM's context and *how* to work on the code.
 The top-level [../README.md](../README.md) is the quick-start; [../FINANCE.md](../FINANCE.md)
 documents the finance domain pack.
 
-## One-paragraph summary
+## Summary
 
-An LLM only sees what you put in its context window. contextx is the layer that
-decides *what goes in*: it **ingests** documents once (chunk → embed → persistent
-index), and per request it **collects** candidate context from every source,
-**retrieves** the relevant pieces (semantic + lexical), **reranks** them with a
-cross-encoder, **ranks/filters/compresses** what survives, fits it to a **token
-budget**, **builds** a clean prompt with citations and trust boundaries,
-**validates** it, and calls the model — while a **cache**, **memory**, and
-**observability** layer wrap the whole flow. The result is a prompt that is
-relevant, in-budget, attributable, safe, and cheap.
+contextx decides what goes into an LLM's context window. It ingests documents
+once (chunk → embed → persistent index), then per request: collect → retrieve
+(semantic + lexical) → rerank → rank → filter → compress → budget → build →
+validate → LLM, with cache, memory, and observability across the flow.
 
-## Conventions in these docs
+## Conventions
 
 - Stage numbers (1–12) match the pipeline and the trace output.
-- File references look like `contextx/retrieve.py` and are relative to the repo
-  root.
-- "Ingest time" = amortized, run once per document; "query time" = per request.
+- File references (`contextx/retrieve.py`) are relative to the repo root.
+- "Ingest time" = once per document; "query time" = per request.
