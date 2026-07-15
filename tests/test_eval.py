@@ -45,6 +45,16 @@ def test_ndcg_rewards_higher_placement():
     assert high > low
 
 
+def test_hard_plus_labels_valid():
+    from contextx.eval.hard_plus import HARD_PLUS_CORPUS, HARD_PLUS_QUERIES
+    ids = {d.doc_id for d in HARD_PLUS_CORPUS}
+    assert len(HARD_PLUS_QUERIES) >= 30
+    for ex in HARD_PLUS_QUERIES:
+        assert ex.relevant
+        for did in ex.relevant:
+            assert did in ids
+
+
 def test_aggregate_bootstrap_ci_brackets_mean():
     vals = [1.0, 1.0, 0.0, 1.0, 0.5]
     agg = M.aggregate({"m": vals}, n_boot=500, seed=0)

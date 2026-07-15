@@ -45,6 +45,19 @@ differences. Reports mean delta, 95% CI, one-sided p-value, and win-rate.
 - If a component shows no aggregate lift, check whether the bi-encoder already
   saturates; the effect may be concentrated in a hard stratum.
 
+### Difficulty-stratified set
+`contextx/eval/hard_plus.py` is a set of confusable clusters (option greeks,
+liquidity/leverage ratios, order types, risk measures, bond types, payment
+rails) where docs share vocabulary and differ by one detail.
+
+```bash
+python examples/eval_hard_plus.py
+```
+
+On this set the reranker's lift is significant on the aggregate (MRR +0.046,
+p=0.041; nDCG@5 +0.034, p=0.041), where a less-confusable set gives p≈0.13.
+recall@5 still saturates; the significant lift is in ordering.
+
 ## Bring your own data
 
 Two JSONL files, one object per line:
