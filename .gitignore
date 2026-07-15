@@ -1,3 +1,8 @@
+# secrets — NEVER commit real keys (public repo)
+.env
+.env.*
+!.env.example
+
 # generated engine state
 .contextx_index/
 .contextx_memory.db
