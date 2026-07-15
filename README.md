@@ -7,6 +7,10 @@ in-budget prompt** for an LLM — then calls the model. Built around the
 > **Domain packs:** a finance preset (capital markets · payments · lending ·
 > compliance/KYC-AML) ships in `contextx/domains/` — see [FINANCE.md](FINANCE.md).
 
+> **Documentation:** full reference in [docs/](docs/) — the optimization method
+> ([context-optimization.md](docs/context-optimization.md)), architecture,
+> developer/onboarding guide, configuration, HTTP API, and evaluation.
+
 ```
 INGEST (amortized):  documents → chunk → embed → persistent FAISS HNSW index
 QUERY  (per request): Collect → Retrieve → Rerank → Rank → Filter → Compress
