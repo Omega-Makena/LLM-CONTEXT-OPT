@@ -66,6 +66,21 @@ def test_faithfulness_no_sources_is_zero():
     assert r.groundedness == 0.0
 
 
+def test_faithfulness_llm_judge():
+    scorer = FaithfulnessScorer(Embedder(force_fallback=True))
+    sources = ["Acme revenue was 5 million dollars."]
+    answer = "Acme revenue was 5 million dollars. The CEO is Jane Doe."
+
+    def judge(prompt):  # supports the revenue claim, rejects the CEO claim
+        claim = prompt.split("Claim:")[1].split("\n")[0].lower()
+        return "YES" if "revenue" in claim else "NO"
+
+    r = scorer.score(answer, sources, judge=judge)
+    assert r.method == "llm-judge"
+    assert r.groundedness == 0.5                       # 1 of 2 claims supported
+    assert any("CEO" in c for c in r.unsupported_claims)
+
+
 # --- #14 observability ----------------------------------------------------
 def test_estimate_cost_and_caching():
     full = estimate_cost("claude-sonnet-5", 1000, 500)
