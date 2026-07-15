@@ -97,7 +97,9 @@ lines, injection scan over untrusted content. A hard failure blocks the call.
 
 **10 — LLM** (`llm.py`). Call the model. Backends: Claude, OpenAI (and
 compatible gateways), Ollama, mock. Retries with backoff + timeout; streaming via
-`stream()`.
+`stream()`. Tool use via `run_tools()` / `engine.run_with_tools()` — the model
+calls provided `Tool`s in an agentic loop (OpenAI function calling, Anthropic
+tool use).
 
 **11 — Observability** (`observability.py`). A `Trace` records per-stage timing,
 counts, token usage, USD cost, request id, and a JSON log line.

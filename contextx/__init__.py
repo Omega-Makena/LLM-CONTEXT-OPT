@@ -20,6 +20,7 @@ Quick start:
 """
 
 from .config import Config
+from .llm import Tool
 from .pipeline import ContextEngine, PipelineResult, StreamResult
 from .types import ContextItem, Document, Request, Source
 
@@ -32,5 +33,6 @@ __all__ = [
     "Document",
     "ContextItem",
     "Source",
+    "Tool",
 ]
 __version__ = "0.3.0"

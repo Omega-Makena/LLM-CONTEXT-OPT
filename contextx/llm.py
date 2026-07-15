@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from .config import Config
 
@@ -35,6 +36,16 @@ class LLMResponse:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     retries: int = 0
+    tool_calls: int = 0        # number of tool invocations in a tool run
+
+
+@dataclass
+class Tool:
+    """A callable the model may invoke. `parameters` is a JSON Schema object."""
+    name: str
+    description: str
+    parameters: dict
+    func: Callable[..., Any]
 
 
 def _system_text(system) -> str:
@@ -282,6 +293,94 @@ class LLM:
         resp = self._mock(system, user)
         resp.text = f"[ollama unavailable: {last}]\n\n" + resp.text
         return resp
+
+    # --- tool use (function calling) --------------------------------------
+    def run_tools(self, system, user: str, tools: list[Tool],
+                  max_iters: int = 6) -> LLMResponse:
+        """Agentic loop: the model may call the provided tools until it produces
+        a final answer. Supported on the openai and anthropic backends; the mock
+        backend answers without tools."""
+        if self.backend == "openai":
+            return self._openai_tools(_system_text(system), user, tools, max_iters)
+        if self.backend == "anthropic":
+            return self._anthropic_tools(system, user, tools, max_iters)
+        return self._mock(system, user)
+
+    @staticmethod
+    def _dispatch(tools: list[Tool], name: str, args: dict) -> str:
+        tool = next((t for t in tools if t.name == name), None)
+        if tool is None:
+            return f"error: no such tool '{name}'"
+        try:
+            return str(tool.func(**args))
+        except Exception as exc:  # tool errors are returned to the model, not raised
+            return f"error: {exc}"
+
+    def _openai_chat_once(self, messages: list[dict], tool_specs: list[dict]) -> dict:
+        """One OpenAI chat call with tools; returns the assistant message dict.
+        Isolated so the tool loop can be unit-tested by patching this method."""
+        body = json.dumps({
+            "model": self.cfg.openai_model, "messages": messages,
+            "tools": tool_specs, "max_tokens": self.cfg.llm_max_tokens,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            self.cfg.openai_base_url.rstrip("/") + "/chat/completions", data=body,
+            headers={"Content-Type": "application/json",
+                     "Authorization": f"Bearer {os.environ.get('OPENAI_API_KEY', '')}"})
+        with urllib.request.urlopen(req, timeout=self.cfg.llm_timeout_s) as r:
+            return json.loads(r.read())["choices"][0]["message"]
+
+    def _openai_tools(self, system: str, user: str, tools: list[Tool],
+                      max_iters: int) -> LLMResponse:
+        specs = [{"type": "function", "function": {
+            "name": t.name, "description": t.description, "parameters": t.parameters}}
+            for t in tools]
+        messages = [{"role": "system", "content": system},
+                    {"role": "user", "content": user}]
+        calls = 0
+        for _ in range(max_iters):
+            msg = self._openai_chat_once(messages, specs)
+            tool_calls = msg.get("tool_calls")
+            if not tool_calls:
+                return LLMResponse(text=msg.get("content") or "", backend="openai",
+                                   model=self.cfg.openai_model, tool_calls=calls)
+            messages.append(msg)
+            for call in tool_calls:
+                calls += 1
+                fn = call["function"]
+                try:
+                    args = json.loads(fn.get("arguments") or "{}")
+                except Exception:
+                    args = {}
+                messages.append({"role": "tool", "tool_call_id": call["id"],
+                                 "content": self._dispatch(tools, fn["name"], args)})
+        return LLMResponse(text="(max tool iterations reached)", backend="openai",
+                           model=self.cfg.openai_model, tool_calls=calls)
+
+    def _anthropic_tools(self, system, user: str, tools: list[Tool],
+                         max_iters: int) -> LLMResponse:  # pragma: no cover - needs key
+        specs = [{"name": t.name, "description": t.description,
+                  "input_schema": t.parameters} for t in tools]
+        messages = [{"role": "user", "content": user}]
+        calls = 0
+        for _ in range(max_iters):
+            msg = self._client.messages.create(
+                model=self.model, max_tokens=self.cfg.llm_max_tokens,
+                system=system, tools=specs, messages=messages)
+            if msg.stop_reason != "tool_use":
+                text = "".join(b.text for b in msg.content if b.type == "text")
+                return LLMResponse(text=text, backend="anthropic", model=self.model,
+                                   tool_calls=calls)
+            messages.append({"role": "assistant", "content": msg.content})
+            results = []
+            for block in msg.content:
+                if block.type == "tool_use":
+                    calls += 1
+                    results.append({"type": "tool_result", "tool_use_id": block.id,
+                                    "content": self._dispatch(tools, block.name, block.input)})
+            messages.append({"role": "user", "content": results})
+        return LLMResponse(text="(max tool iterations reached)", backend="anthropic",
+                           model=self.model, tool_calls=calls)
 
     # --- mock -------------------------------------------------------------
     def _mock(self, system, user: str) -> LLMResponse:

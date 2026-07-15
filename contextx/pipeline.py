@@ -225,6 +225,33 @@ class ContextEngine:
             stream=gen(), sources=prep.prompt.sources,
             low_confidence=prep.low_confidence, prompt=prep.prompt, trace=trace)
 
+    def run_with_tools(
+        self, request: Request, tools: list, write_memory: bool = True,
+        **ephemeral_sources: Any,
+    ) -> PipelineResult:
+        """Like run(), but the model may call `tools` (a list of llm.Tool) in an
+        agentic loop after the context prompt is built. Bypasses the response
+        cache (tool runs are not cacheable)."""
+        trace = Trace()
+        prep = self._prepare(request, trace, **ephemeral_sources)
+        with trace.stage("10 llm+tools") as rec:
+            if not prep.report.ok:
+                response = LLMResponse(
+                    text="[BLOCKED] validation failed: " + "; ".join(prep.report.errors),
+                    backend="none")
+            else:
+                response = self.llm.run_tools(
+                    prep.prompt.system_blocks, prep.prompt.user, tools)
+            rec.notes["backend"] = response.backend
+            rec.notes["tool_calls"] = response.tool_calls
+        if write_memory and prep.report.ok:
+            self.memory.extract_and_store(
+                request.user_message, response.text, scope=prep.scope)
+        self._finalize(request, trace, prep, response)
+        return PipelineResult(
+            answer=response.text, prompt=prep.prompt, llm=response, trace=trace,
+            sources=prep.prompt.sources, low_confidence=prep.low_confidence)
+
     # --- async entry points ----------------------------------------------
     # The pipeline is CPU/GPU-bound (embedding, reranking), so the correct async
     # integration is to offload the sync work to a worker thread — the event
