@@ -83,6 +83,10 @@ report, confidence, scope). Then:
 - `arun()` / `arun_stream()` are the async wrappers — they offload the sync
   CPU/GPU-bound pipeline to a worker thread so an async host's event loop is never
   blocked (the correct async model for CPU-bound work).
+- `arun_with_sources(request, fetchers)` awaits async source fetchers
+  concurrently (`asyncio.gather`) — N remote fetches cost ~one round-trip — then
+  runs the pipeline. Embedding is batched within a request (`embed_batch_size`);
+  cross-request batching is a serving-layer concern, out of the library's scope.
 
 ## The vector-store seam
 

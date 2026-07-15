@@ -277,6 +277,21 @@ class ContextEngine:
         sr.stream = agen()
         return sr
 
+    async def arun_with_sources(
+        self, request: Request, fetchers: list, write_memory: bool = True,
+        **ephemeral_sources: Any,
+    ) -> PipelineResult:
+        """Fetch ephemeral sources concurrently, then run(). Each fetcher is an
+        async callable `(request) -> list[str]`; they run together (asyncio.gather)
+        so N remote fetches cost ~one round-trip, not N. Their outputs join the
+        request's tool_outputs."""
+        fetched: list[str] = list(ephemeral_sources.pop("tool_outputs", []))
+        if fetchers:
+            for result in await asyncio.gather(*(f(request) for f in fetchers)):
+                fetched.extend(result)
+        return await self.arun(
+            request, write_memory=write_memory, tool_outputs=fetched, **ephemeral_sources)
+
     # --- shared prepare (stages 1-9) -------------------------------------
     def _prepare(
         self, request: Request, trace: Trace, **ephemeral_sources: Any

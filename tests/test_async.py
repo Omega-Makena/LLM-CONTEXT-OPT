@@ -39,3 +39,26 @@ def test_arun_stream(engine):
     sr, chunks = asyncio.run(go())
     assert chunks and "".join(chunks).strip()
     assert any(s["doc_id"] == "r" for s in sr.sources)
+
+
+def test_arun_with_sources_concurrent(engine):
+    import time
+
+    async def fetch_a(req):
+        await asyncio.sleep(0.3)
+        return ["Fetched note: the sky is blue today."]
+
+    async def fetch_b(req):
+        await asyncio.sleep(0.3)
+        return ["Fetched note: unrelated weather trivia."]
+
+    async def go():
+        t = time.perf_counter()
+        res = await engine.arun_with_sources(
+            Request(user_message="what color is the sky?"),
+            [fetch_a, fetch_b], write_memory=False)
+        return res, time.perf_counter() - t
+
+    res, elapsed = asyncio.run(go())
+    assert elapsed < 0.6                        # 2x0.3s ran concurrently, not 0.6s+
+    assert "sky is blue" in res.prompt.user      # fetched source reached retrieval
