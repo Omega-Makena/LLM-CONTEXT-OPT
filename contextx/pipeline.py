@@ -14,6 +14,7 @@ Every stage records into a Trace so you can see counts and latency move.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,6 +41,15 @@ DEFAULT_SYSTEM = (
     "You are a helpful assistant. Use the provided context blocks to answer the "
     "user's request accurately. If the context is insufficient, say so."
 )
+
+_STREAM_DONE = object()
+
+
+def _next_or_done(it):
+    try:
+        return next(it)
+    except StopIteration:
+        return _STREAM_DONE
 
 
 def _memory_scope(request: Request) -> str:
@@ -212,6 +222,31 @@ class ContextEngine:
         return StreamResult(
             stream=gen(), sources=prep.prompt.sources,
             low_confidence=prep.low_confidence, prompt=prep.prompt, trace=trace)
+
+    # --- async entry points ----------------------------------------------
+    # The pipeline is CPU/GPU-bound (embedding, reranking), so the correct async
+    # integration is to offload the sync work to a worker thread — the event
+    # loop is never blocked. These are the await-able API for async hosts.
+    async def arun(
+        self, request: Request, write_memory: bool = True, **ephemeral_sources: Any
+    ) -> PipelineResult:
+        return await asyncio.to_thread(self.run, request, write_memory, **ephemeral_sources)
+
+    async def arun_stream(
+        self, request: Request, write_memory: bool = True, **ephemeral_sources: Any
+    ) -> StreamResult:
+        sr = await asyncio.to_thread(self.run_stream, request, write_memory, **ephemeral_sources)
+        sync_gen = sr.stream
+
+        async def agen():
+            while True:  # pull each chunk off the sync generator in a thread
+                chunk = await asyncio.to_thread(_next_or_done, sync_gen)
+                if chunk is _STREAM_DONE:
+                    break
+                yield chunk
+
+        sr.stream = agen()
+        return sr
 
     # --- shared prepare (stages 1-9) -------------------------------------
     def _prepare(

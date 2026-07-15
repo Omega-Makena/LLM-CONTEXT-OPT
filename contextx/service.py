@@ -150,7 +150,7 @@ def create_app(
             max_context_tokens=body.max_context_tokens,
             reserve_output_tokens=body.reserve_output_tokens,
         )
-        result = await asyncio.to_thread(app.state.engine.run, req)
+        result = await app.state.engine.arun(req)
         return QueryOut(
             answer=result.answer,
             sources=result.sources,
@@ -171,14 +171,14 @@ def create_app(
             max_context_tokens=body.max_context_tokens,
             reserve_output_tokens=body.reserve_output_tokens,
         )
-        # retrieval/build run in a thread; streaming runs in FastAPI's threadpool
-        result = await asyncio.to_thread(app.state.engine.run_stream, req)
+        # fully async: prepare offloads to a thread, chunks are pulled off-loop
+        result = await app.state.engine.arun_stream(req)
 
-        def sse():
+        async def sse():
             meta = {"tenant_id": ident.tenant_id, "sources": result.sources,
                     "low_confidence": result.low_confidence}
             yield f"event: meta\ndata: {_json.dumps(meta)}\n\n"
-            for chunk in result.stream:
+            async for chunk in result.stream:
                 yield f"data: {_json.dumps({'text': chunk})}\n\n"
             yield "event: done\ndata: {}\n\n"
 
