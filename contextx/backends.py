@@ -193,6 +193,74 @@ class PgVectorBackend:
         pass
 
 
+class QdrantBackend:
+    """Qdrant vector database. `qdrant_location` is ":memory:" (ephemeral), a
+    local path (persistent), or an http(s) URL (server). Vectors are
+    L2-normalized, so cosine distance gives cosine similarity directly."""
+
+    name = "qdrant"
+
+    def __init__(self, cfg: Config) -> None:
+        try:
+            from qdrant_client import QdrantClient, models
+        except Exception as exc:  # pragma: no cover - optional dep
+            raise ImportError(
+                "qdrant backend needs qdrant-client: pip install qdrant-client"
+            ) from exc
+        self.cfg = cfg
+        self._models = models
+        loc = cfg.qdrant_location
+        if loc == ":memory:":
+            self._client = QdrantClient(location=":memory:")
+        elif loc.startswith("http"):
+            self._client = QdrantClient(url=loc)
+        else:
+            Path(loc).mkdir(parents=True, exist_ok=True)
+            self._client = QdrantClient(path=loc)
+        self._coll = cfg.qdrant_collection
+        self._ready = self._client.collection_exists(self._coll)
+
+    def _ensure(self, dim: int) -> None:
+        if not self._ready:
+            if not self._client.collection_exists(self._coll):
+                self._client.create_collection(
+                    self._coll,
+                    vectors_config=self._models.VectorParams(
+                        size=dim, distance=self._models.Distance.COSINE),
+                )
+            self._ready = True
+
+    def add(self, rows: list[int], vecs: np.ndarray) -> None:
+        self._ensure(vecs.shape[1])
+        points = [
+            self._models.PointStruct(id=int(r), vector=v.astype(float).tolist())
+            for r, v in zip(rows, vecs)
+        ]
+        self._client.upsert(self._coll, points=points)
+
+    def search(self, qvec: np.ndarray, k: int):
+        if not self._ready:
+            return np.array([]), np.array([])
+        pts = self._client.query_points(
+            self._coll, query=qvec.astype(float).tolist(), limit=int(k)).points
+        return (np.array([p.id for p in pts]),
+                np.array([p.score for p in pts], dtype=np.float32))
+
+    def count(self) -> int:
+        return self._client.count(self._coll).count if self._ready else 0
+
+    def reset(self) -> None:
+        if self._client.collection_exists(self._coll):
+            self._client.delete_collection(self._coll)
+        self._ready = False
+
+    def save(self, directory: Path) -> None:
+        pass  # Qdrant persists (path / server); :memory: is ephemeral
+
+    def load(self, directory: Path) -> None:
+        pass
+
+
 def make_backend(cfg: Config) -> VectorBackend:
     choice = cfg.vector_backend
     if choice == "auto":
@@ -208,4 +276,6 @@ def make_backend(cfg: Config) -> VectorBackend:
         return NumpyBackend(cfg)
     if choice == "pgvector":
         return PgVectorBackend(cfg)
+    if choice == "qdrant":
+        return QdrantBackend(cfg)
     raise ValueError(f"unknown vector_backend: {choice!r}")

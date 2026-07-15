@@ -93,6 +93,7 @@ index — the part with the single-node RAM ceiling — lives behind the narrow
 `Config.vector_backend` to change it:
 - `faiss` — HNSW ANN, in-process (default).
 - `numpy` — brute-force cosine fallback.
+- `qdrant` — Qdrant (`:memory:`, local path, or server URL).
 - `pgvector` — Postgres + pgvector (experimental; needs a DB; not CI-covered).
 
 Contract: the store assigns each vector a dense integer `row` id (rebuild

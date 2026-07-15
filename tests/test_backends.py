@@ -46,6 +46,32 @@ def test_pgvector_unavailable_fails_cleanly():
         make_backend(Config(vector_backend="pgvector"))
 
 
+def test_qdrant_backend_roundtrip():
+    pytest.importorskip("qdrant_client")
+    from contextx.backends import QdrantBackend
+    b = QdrantBackend(Config(qdrant_location=":memory:", qdrant_collection="t_rt"))
+    b.add([0, 1, 2], np.eye(3, dtype=np.float32))
+    assert b.count() == 3
+    rows, _ = b.search(np.array([1, 0, 0], dtype=np.float32), 2)
+    assert int(rows[0]) == 0
+    b.reset()
+    assert b.count() == 0
+
+
+def test_store_with_qdrant(tmp_path):
+    pytest.importorskip("qdrant_client")
+    from contextx.embeddings import Embedder
+    from contextx.store import VectorStore
+    from contextx.types import Document
+    s = VectorStore(Embedder(force_fallback=True), Config(
+        index_dir=str(tmp_path / "i"), vector_backend="qdrant",
+        qdrant_location=":memory:", qdrant_collection="t_store"))
+    s.add_documents([Document(text="hello world alpha", doc_id="h"),
+                     Document(text="goodbye moon beta", doc_id="g")])
+    assert s.backend == "qdrant"
+    assert s.search("hello", 1)[0].metadata["doc_id"] == "h"
+
+
 def test_store_honours_selected_backend(tmp_path):
     from contextx.embeddings import Embedder
     from contextx.store import VectorStore

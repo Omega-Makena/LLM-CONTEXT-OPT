@@ -31,9 +31,11 @@ Defaults below are the shipped values.
 | Field | Default | Meaning |
 |---|---|---|
 | `index_dir` | `.contextx_index` | directory for the SQLite chunk store + vector index. |
-| `vector_backend` | `auto` | `auto` (faiss if installed else numpy), `faiss`, `numpy`, or `pgvector` (experimental). |
+| `vector_backend` | `auto` | `auto` (faiss if installed else numpy), `faiss`, `numpy`, `qdrant`, or `pgvector` (experimental). |
 | `pg_dsn` | `postgresql://localhost/contextx` | Postgres DSN for the pgvector backend. |
 | `pg_table` | `contextx_vectors` | table name for pgvector. |
+| `qdrant_location` | `:memory:` | `:memory:`, a local path, or an http(s) URL for the qdrant backend. |
+| `qdrant_collection` | `contextx` | qdrant collection name. |
 | `hnsw_M` | `32` | HNSW graph degree — higher = better recall, more RAM. |
 | `hnsw_ef_construction` | `200` | HNSW build-time quality. |
 | `hnsw_ef_search` | `64` | HNSW query-time recall/latency tradeoff. |

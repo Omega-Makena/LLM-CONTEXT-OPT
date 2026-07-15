@@ -32,11 +32,13 @@ llm = ["anthropic>=0.39"]
 serve = ["fastapi>=0.110", "uvicorn>=0.27"]
 # document parsers
 ingest = ["pypdf>=4.0", "beautifulsoup4>=4.12"]
+# managed vector DB backends
+qdrant = ["qdrant-client>=1.9"]
 # everything
 full = [
     "faiss-cpu>=1.7", "sentence-transformers>=2.2", "tiktoken>=0.5",
     "anthropic>=0.39", "fastapi>=0.110", "uvicorn>=0.27",
-    "pypdf>=4.0", "beautifulsoup4>=4.12",
+    "pypdf>=4.0", "beautifulsoup4>=4.12", "qdrant-client>=1.9",
 ]
 dev = ["pytest>=7.0", "ruff>=0.4"]
 
