@@ -37,7 +37,7 @@ stage component and threads a single `ContextItem` list + `Trace` through them.
 | `pipeline.py` | `ContextEngine` — orchestrates all stages; `ingest/run/run_stream/arun/arun_stream` |
 | `collect.py` | Stage 1 — gather ephemeral context |
 | `store.py` | Persistent store: SQLite chunks + FTS5 lexical + pluggable vector index; ingest, search, delete/update, rebuild, model-version stamping, tenant/ACL |
-| `backends.py` | `VectorBackend` interface + `FaissBackend`, `NumpyBackend`, `PgVectorBackend` |
+| `backends.py` | `VectorBackend` interface + `FaissBackend`, `NumpyBackend`, `QdrantBackend`, `PgVectorBackend` |
 | `chunking.py` | Structure-aware chunking (headings, atomic code blocks, overlap) |
 | `retrieve.py` | Stage 2 — hybrid recall (semantic + lexical + RRF), ephemeral scoring, BM25 |
 | `rerank.py` | Stage 2b — cross-encoder reranker (+ raw score for abstention) |
@@ -48,7 +48,7 @@ stage component and threads a single `ContextItem` list + `Trace` through them.
 | `budget.py` | Stage 7 — token counting + budget fitting |
 | `build.py` | Stage 8 — prompt assembly, trust fencing, citations, cache markers |
 | `validate.py` | Stage 9 — pre-flight checks + injection scan |
-| `llm.py` | Stage 10 — pluggable LLM backends (Claude/OpenAI/Ollama/mock), retries, streaming |
+| `llm.py` | Stage 10 — pluggable LLM backends (Claude/OpenAI/Ollama/mock), retries, streaming, tool use |
 | `observability.py` | Stage 11 — `Trace`, per-stage timing, cost estimation, structured logs |
 | `cache.py` | Stage 12 — bounded LRU + TTL + semantic response cache |
 | `security.py` | PII/financial redaction, append-only audit log |
@@ -87,6 +87,60 @@ report, confidence, scope). Then:
   concurrently (`asyncio.gather`) — N remote fetches cost ~one round-trip — then
   runs the pipeline. Embedding is batched within a request (`embed_batch_size`);
   cross-request batching is a serving-layer concern, out of the library's scope.
+
+## Request lifecycle
+
+`run()` for one query:
+
+```
+Request
+  → _prepare()                              # stages 1–9, in a worker thread under arun()
+      1  collect ephemeral context + read memory (scope tenant:user)
+      2  retrieve: vector ANN + FTS5 lexical → RRF, tenant/ACL filtered
+      2b rerank recall set (cross-encoder) → confidence / abstention flag
+      3  rank (weighted blend)   4 filter (dedup/stale/contradiction)
+      6  compress oversized      7 budget to the window
+      (redact PII if enabled)
+      8  build prompt (fenced untrusted + numbered citations + cache marker)
+      9  validate (ceiling, delimiters, injection scan)
+      → _Prepared(prompt, report, confidence, scope)
+  → 10 LLM (via semantic cache)             # blocked here if validation failed
+  → 5  write memory (extract facts)
+  → _finalize()                             # metrics, USD cost, audit, log
+  → PipelineResult(answer, sources, low_confidence, trace)
+```
+
+`run_stream()` shares `_prepare()`, then streams stage 10 and writes memory when
+the stream is drained. `run_with_tools()` replaces stage 10 with an agentic
+tool loop.
+
+## Storage & data model
+
+State lives under `Config.index_dir` plus the memory DB. Nothing is global.
+
+| Store | Location | Holds |
+|---|---|---|
+| Chunk store | `index_dir/chunks.db` (SQLite) | one row per chunk: `row` id, `chunk_id`, `doc_id`, `source`, `text`, `metadata`, `tenant_id`, `acl`, `embedding` blob, `timestamp` |
+| Lexical index | `chunks_fts` (SQLite FTS5, same DB) | BM25 full-text over chunk text |
+| Meta | `meta` table (same DB) | stamped embedding model + dim (mismatch guard) |
+| Vector index | backend-specific (`index_dir/index.faiss`, `matrix.npy`, Qdrant, or Postgres) | one vector per chunk, keyed by `row` |
+| Memory | `Config.memory_db_path` (SQLite) | per-`scope` facts: text, type, importance, ttl, `fact_key`/`value`, embedding |
+| Sync manifest | `index_dir/sync_manifest.json` | file content-hashes for incremental `DirectorySync` |
+
+The chunk store is the source of truth; the vector index is derived (a `rebuild()`
+reconstructs it from the stored embeddings and compacts tombstones).
+
+## Deployment
+
+- **Embedded (library):** construct one `ContextEngine` and call it. State is on
+  local disk; single process. Good for scripts, notebooks, one-box services.
+- **Service:** `contextx.service:create_app` (FastAPI). One engine per worker;
+  API-key auth maps callers to tenants; writes serialized with an async lock; the
+  sync engine runs in a threadpool. Ships with a `Dockerfile`.
+- **Scaling:** the CPU/GPU-bound work (embedding, reranking) scales with worker
+  threads/processes; the vector index scales by swapping the `VectorBackend`
+  (Qdrant or pgvector) off single-node FAISS. Chunk/memory SQLite is single-writer
+  per process — move to Postgres/a shared store for multi-writer deployments.
 
 ## The vector-store seam
 
